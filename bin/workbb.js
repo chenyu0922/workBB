@@ -22,6 +22,9 @@ const __dirname = path.dirname(__filename);
 import { ALL_PATCHES, CONTENT_POLICY_REPLACEMENT } from '../lib/patches.js';
 import { report as whichReport } from '../lib/which-template.js';
 import { upgradeIdentityFiles, auditIdentityFiles } from '../lib/identity-upgrade.js';
+import { findProductJson, applyProductJson, revertProductJson, verifyProductJson, fingerprintProductJson } from '../lib/product-json.js';
+import { findGateFiles, applyGates, revertGates, gateState } from '../lib/gate-js.js';
+import { findPluginTpls, patchPluginTpls, findRuntimeCaches, purgeRuntimeCaches } from '../lib/data-layers.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -575,6 +578,148 @@ function SETTING_LABEL(s) {
   return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
 }
 
+// ── layers（六层靶点全链路）────────────────────────────────
+
+function cmdLayers() {
+  const action = process.argv[3] || 'status';
+  printBanner();
+
+  // 安装根
+  let installRoot = arg('--root');
+  if (!installRoot) {
+    const st = readState();
+    const src = st?.sourceDir || '';
+    const m = src.match(/^(.+?)[\\/]resources[\\/]/);
+    if (m) installRoot = m[1];
+  }
+  if (!installRoot) {
+    const ap = process.env.WORKBUDDY_APP_PATH?.trim();
+    if (ap) installRoot = path.basename(ap).toLowerCase() === 'resources' ? path.dirname(ap) : ap;
+  }
+  if (!installRoot || !fs.existsSync(installRoot)) {
+    console.error(paint(C.red, '✗ 定位不到安装根。用 --root "<安装根>" 指定'));
+    return 1;
+  }
+
+  const { CONTENT_POLICY_STRONG, overrideBlock } = { CONTENT_POLICY_STRONG: null, overrideBlock: null };
+
+  if (action === 'status') {
+    console.log(`  安装根 : ${installRoot}`);
+    console.log('');
+
+    // L1
+    const tplDir = overrideRoot();
+    const mainTpl = path.join(tplDir, 'workbuddy-prompt.tpl');
+    const l1 = fs.existsSync(mainTpl) ? fs.readFileSync(mainTpl, 'utf8') : '';
+    const l1cp = (l1.match(/<content_policy>[\s\S]*?<\/content_policy>/) || [''])[0];
+    console.log(paint(C.bold, '  L1  templates 政策块'));
+    console.log(`      ${l1 ? 'refuse=' + (l1.match(/You MUST refuse/g) || []).length + '  cp=' + l1cp.length + 'B' : '模板缺失'}`);
+    console.log('');
+
+    // L2
+    console.log(paint(C.bold, '  L2  cli/product.json 政策块'));
+    const pj = findProductJson(installRoot);
+    if (!pj.length) console.log(paint(C.gray, '      未找到'));
+    for (const f of pj) {
+      const fp = fingerprintProductJson(f.path);
+      const mark = fp.anchorCount === 0 && fp.hasReplacement ? paint(C.green, '✓') : paint(C.yellow, '!');
+      console.log(`      ${mark} ${f.rel.replace(/resources\/app\.asar\.unpacked\//, '')}`);
+      console.log(`         refuse=${fp.anchorCount}  cp=${fp.cpLen}B  已替换=${fp.hasReplacement}`);
+    }
+    console.log('');
+
+    // L3
+    console.log(paint(C.bold, '  L3  命令闸门 JS'));
+    const gates = findGateFiles(installRoot);
+    if (!gates.length) console.log(paint(C.gray, '      未找到闸门函数'));
+    for (const g of gates) {
+      const ok = g.found === g.opened;
+      const mark = ok ? paint(C.green, '✓') : paint(C.yellow, '!');
+      console.log(`      ${mark} ${g.name.padEnd(26)} found=${g.found} opened=${g.opened}`);
+    }
+    console.log('');
+
+    // L4
+    console.log(paint(C.bold, '  L4  data\\plugins 模板'));
+    const t4 = findPluginTpls().filter((x) => x.hasPolicy);
+    const sumRefuse = t4.reduce((a, b) => a + b.anchorCount, 0);
+    console.log(`      含政策 ${t4.length} 个，剩余 refuse 合计 ${sumRefuse}`);
+    if (t4.length) {
+      const bad = t4.filter((x) => x.anchorCount > 0);
+      if (bad.length) console.log(paint(C.yellow, `      有 ${bad.length} 个仍是原版`));
+    }
+    console.log('');
+
+    // L5
+    console.log(paint(C.bold, '  L5  运行时缓存'));
+    const c5 = findRuntimeCaches();
+    if (!c5.length) {
+      console.log(paint(C.green, '      已清空（下次启动将从已打补丁的 product.json 重建）'));
+    } else {
+      for (const c of c5) {
+        const mark = c.hasReplacement ? paint(C.green, '✓') : paint(C.yellow, '!');
+        console.log(`      ${mark} ${c.name.slice(20, 44)}  refuse=${c.anchorCount}  ${c.hasReplacement ? '已替换' : '仍是旧政策'}`);
+      }
+    }
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'apply') {
+    const dryRun = has('--dry-run');
+    // 动态取策略（避免顶层循环依赖）
+    return import('../lib/patches-strong.js').then((ps) => {
+      const policyBlock = ps.CONTENT_POLICY_STRONG;
+      const overrideFor = ps.overrideBlock;
+
+      console.log(`  安装根 : ${installRoot}${dryRun ? paint(C.yellow, '  (dry-run)') : ''}`);
+      console.log('');
+
+      const l2 = applyProductJson({ installRoot, policyBlock, overrideFor, dryRun });
+      console.log(paint(C.bold, '  L2  product.json'));
+      if (!l2.files.length) console.log(paint(C.gray, '      无文件'));
+      for (const f of l2.files) {
+        console.log(`      ${f.changed ? paint(C.green, '✓') : paint(C.gray, '·')} ${f.rel.replace(/resources\/app\.asar\.unpacked\//, '')}  policy=${f.replacedPolicy || 0}  ${f.bytesBefore || '?'}→${f.bytesAfter || '?'}`);
+      }
+      console.log('');
+
+      const l3 = applyGates({ installRoot, dryRun });
+      console.log(paint(C.bold, '  L3  命令闸门'));
+      if (!l3.files.length) console.log(paint(C.gray, '      无闸门函数'));
+      for (const f of l3.files) {
+        console.log(`      ${f.changed ? paint(C.green, '✓ 放行') : paint(C.gray, '· 已是放行态')} ${f.name}  inject=${f.injected || 0}`);
+      }
+      console.log('');
+
+      const l4 = patchPluginTpls({ policyBlock, overrideFor, dryRun });
+      console.log(paint(C.bold, '  L4  data\\plugins 模板'));
+      console.log(`      含政策 ${l4.total} 个，替换 ${l4.changed.length} 个`);
+      console.log('');
+
+      const l5 = purgeRuntimeCaches({ dryRun });
+      console.log(paint(C.bold, '  L5  运行时缓存'));
+      console.log(`      清理 ${l5.purged.length} 个，保留 ${l5.kept.length} 个`);
+      console.log('');
+
+      console.log(paint(C.gray, '  改完必须完全退出 WorkBuddy（含托盘）再打开。'));
+      console.log('');
+      return 0;
+    });
+  }
+
+  if (action === 'revert') {
+    const r2 = revertProductJson({ installRoot });
+    const r3 = revertGates({ installRoot });
+    console.log(paint(C.green, `✓ 已还原 L2 ${r2.length} 个、L3 ${r3.length} 个`));
+    console.log(paint(C.gray, '  L4 模板请用 workbb revert（会连身份层一起处理）'));
+    console.log('');
+    return 0;
+  }
+
+  console.log('用法: workbb layers status|apply|revert [--root <安装根>] [--dry-run]');
+  return 1;
+}
+
 // ── which（证明读了哪份模板）──────────────────────────────
 
 function cmdWhich() {
@@ -1000,6 +1145,7 @@ const table = {
   launcher: cmdLauncher,
   render: cmdRender,
   guard: cmdGuard,
+  layers: cmdLayers,
   which: cmdWhich,
   identity: cmdIdentity,
   sealed: cmdSealed,

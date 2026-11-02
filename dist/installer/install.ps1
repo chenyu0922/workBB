@@ -537,6 +537,43 @@ if (Test-Path $soulPath) {
 }
 
 # ════════════════════════════════════════════════════════
+#  6.8 ★★ 六层靶点补全（L2 product.json / L3 命令闸门 / L4 插件模板 / L5 缓存）
+# ════════════════════════════════════════════════════════
+Step "6.8" "六层靶点补全（关键）"
+
+Info "此前只改了 L1 模板。实测还发现 4 个未覆盖的层："
+Info "  L2  cli/product.json 里另有一整份 content_policy（1438 B, 5 处 You MUST refuse）"
+Info "  L3  checkBashSecurityWindows / checkPowerShellSecurity 命令闸门"
+Info "  L4  data\\plugins 缓存的插件模板"
+Info "  L5  data\\cache 运行时缓存（含旧政策，会顶回改动）"
+Info ""
+
+Push-Location $WorkBB
+try {
+    $lOut = & $nodeExe 'bin\\workbb.js' 'layers' 'apply' '--root' $InstallRoot 2>&1 | Out-String
+    $lCode = $LASTEXITCODE
+} finally { Pop-Location }
+Write-Host $lOut -ForegroundColor DarkGray
+
+if ($lOut -match 'L2' -and $lOut -match 'L5') {
+    Ok "六层靶点已补全"
+} else {
+    Warn "六层补全可能有异常，见上方输出"
+}
+
+# 复检
+Push-Location $WorkBB
+try {
+    $stOut = & $nodeExe 'bin\\workbb.js' 'layers' 'status' '--root' $InstallRoot 2>&1 | Out-String
+} finally { Pop-Location }
+$l1ok = $stOut -match 'L1[\s\S]*refuse=0'
+$l2ok = $stOut -match 'refuse=0  cp=437B  已替换=true'
+$l3ok = $stOut -match 'opened=2'
+if ($l1ok) { Ok "L1 模板政策已替换" } else { Warn "L1 未达标" }
+if ($l2ok) { Ok "L2 product.json 政策已替换" } else { Warn "L2 未达标" }
+if ($l3ok) { Ok "L3 命令闸门已放行" } else { Warn "L3 未达标" }
+
+# ════════════════════════════════════════════════════════
 #  7. 最终状态
 # ════════════════════════════════════════════════════════
 Step 7 "最终状态"
