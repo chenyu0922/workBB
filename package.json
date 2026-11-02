@@ -61,5 +61,8 @@
   "workbuddyTarget": ">=5.9.0",
   "directories": {
     "lib": "lib"
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.3.1"
   }
 }

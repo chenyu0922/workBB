@@ -40,6 +40,7 @@ import {
 } from '../lib/inject.js';
 import {
   overrideRoot,
+  backupRoot,
   resolveTemplatesDir,
   resolveSourceTemplatesDir,
   resolveSourceTemplatesInfo,
@@ -59,6 +60,15 @@ import {
   purgePendingInstallers,
   updateCacheCandidates,
 } from '../lib/upgrade-guard.js';
+import {
+  openAsar,
+  fileMode,
+  findAppAsar,
+  injectIntoSar,
+  verifyInjection,
+  restoreAsar,
+  listEntries,
+} from '../lib/asar-inject.js';
 
 const C = {
   reset: '\u001b[0m',
@@ -552,6 +562,125 @@ function SETTING_LABEL(s) {
   return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
 }
 
+// ── sealed（密封态：直接改 app.asar）────────────────────
+
+function cmdSealed() {
+  const action = process.argv[3] || 'status';
+  printBanner();
+
+  // 定位安装根 → app.asar
+  let installRoot = arg('--root');
+  if (!installRoot) {
+    const src = resolveSourceTemplatesDir();
+    if (src) {
+      // .../resources/app.asar.unpacked/resources/templates → 上溯 4 层
+      const guess = path.resolve(src, '..', '..', '..', '..');
+      installRoot = guess;
+    }
+  }
+  if (!installRoot) {
+    const ap = process.env.WORKBUDDY_APP_PATH?.trim();
+    if (ap) installRoot = path.basename(ap).toLowerCase() === 'resources' ? path.dirname(ap) : ap;
+  }
+  if (!installRoot) {
+    console.error(paint(C.red, '✗ 定位不到安装根。用 --root "<安装根>" 指定'));
+    return 1;
+  }
+
+  const asarPath = arg('--asar') || findAppAsar(installRoot);
+  if (!asarPath || !fs.existsSync(asarPath)) {
+    console.error(paint(C.red, `✗ 找不到 app.asar：${asarPath || '(未探测到)'}`));
+    return 1;
+  }
+
+  if (action === 'status') {
+    const a = openAsar(asarPath);
+    const { packed, unpacked } = listEntries(a.header);
+    const mode = fileMode(a, 'resources/templates/workbuddy-prompt.tpl');
+    console.log(`  app.asar : ${asarPath}  (${(fs.statSync(asarPath).size / 1024 / 1024).toFixed(1)} MB)`);
+    console.log(`  安装根   : ${installRoot}`);
+    console.log('');
+    console.log(`  条目统计 : packed=${packed.length}  unpacked=${unpacked.length}`);
+    console.log(`  模板形态 : ${mode}${mode === 'unpacked' ? paint(C.gray, '  （走 env 接管，不需要改 asar）') : mode === 'packed' ? paint(C.yellow, '  （密封态，需要 sealed apply）') : ''}`);
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'apply') {
+    console.log(`  安装根   : ${installRoot}`);
+    console.log(`  app.asar : ${asarPath}`);
+    console.log(`  模板源   : ${overrideRoot()}`);
+    console.log('');
+
+    if (!fs.existsSync(overrideRoot())) {
+      console.error(paint(C.red, '✗ 还没有定制模板。先跑: workbb apply'));
+      return 1;
+    }
+
+    const r = injectIntoSar({
+      templatesDir: overrideRoot(),
+      asarPath,
+      backupDir: backupRoot(),
+    });
+
+    if (r.result === 'none-packed') {
+      console.log(paint(C.yellow, '· 模板不是 packed 形态，不需要改 asar'));
+      console.log(paint(C.gray, '  直接用 env 接管即可（workbb launcher 或 setx）'));
+      for (const s of r.skipped.slice(0, 5)) console.log(paint(C.gray, `    ${s.name}: ${s.reason}`));
+      console.log('');
+      return 0;
+    }
+
+    console.log(paint(C.green, `✓ 已注入 ${r.replaced.length} 个模板到 app.asar`));
+    for (const f of r.replaced) console.log('    ' + f);
+    console.log('');
+    console.log(`  备份     : ${r.backup}${r.backupCreated ? paint(C.gray, '（新建）') : paint(C.gray, '（已存在）')}`);
+    console.log(`  大小     : ${r.sizeBefore} → ${r.sizeAfter}  (${((r.sizeAfter - r.sizeBefore) / 1024).toFixed(0)} KB)`);
+    console.log('');
+    const v = verifyInjection(asarPath, overrideRoot());
+    const ok = v.filter((x) => x.match).length;
+    console.log(`  读回校验 : ${ok}/${v.length} 一致${ok === v.length ? paint(C.green, ' ✓') : paint(C.red, ' ✗')}`);
+    for (const x of r.skipped) console.log(paint(C.yellow, `    ${x.name}: ${x.reason}`));
+    console.log('');
+    console.log(paint(C.gray, '  下次启动 WorkBuddy 生效。若被升级覆盖，重跑此命令或 workbb guard heal'));
+    console.log('');
+    return ok === v.length ? 0 : 1;
+  }
+
+  if (action === 'revert') {
+    const r = restoreAsar(asarPath, backupRoot());
+    if (r.restored) {
+      console.log(paint(C.green, '✓ 已从备份还原 app.asar'));
+      console.log(`    来源 : ${r.from}`);
+      console.log(`    大小 : ${(r.size / 1024 / 1024).toFixed(1)} MB`);
+    } else {
+      console.log(paint(C.yellow, `· ${r.reason}`));
+    }
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'verify') {
+    const v = verifyInjection(asarPath, overrideRoot());
+    if (!v.length) {
+      console.log(paint(C.yellow, '· 没有 packed 模板可校验（说明是 unpacked 形态）'));
+      console.log('');
+      return 0;
+    }
+    for (const x of v) {
+      console.log(`  ${x.match ? paint(C.green, '✓') : paint(C.red, '✗')} ${x.file.padEnd(34)} ${x.bytes} B`);
+    }
+    const ok = v.filter((x) => x.match).length;
+    console.log('');
+    console.log(ok === v.length ? paint(C.green, `✓ 全部一致 (${ok}/${v.length})`) : paint(C.red, `✗ ${v.length - ok} 个不一致`));
+    console.log('');
+    return ok === v.length ? 0 : 1;
+  }
+
+  console.log('用法: workbb sealed status|apply|revert|verify [--root <安装根>] [--asar <app.asar>]');
+  return 1;
+}
+
 // ── help ────────────────────────────────────────────────
 
 function cmdHelp() {
@@ -576,6 +705,9 @@ function cmdHelp() {
   console.log('      purge    清理已下载的升级包');
   console.log('      heal     官方升级后自动重打补丁');
   console.log('');
+  console.log('  workbb sealed status|apply|verify|revert [--root <安装根>]');
+  console.log('      密封态（模板打包在 app.asar 内）时直接改 asar 注入');
+  console.log('');
   console.log('  workbb verify [--dir <路径>]');
   console.log('      Nunjucks 离线渲染校验：无语法错误 + 无策略段残留');
   console.log('');
@@ -599,6 +731,7 @@ const table = {
   launcher: cmdLauncher,
   render: cmdRender,
   guard: cmdGuard,
+  sealed: cmdSealed,
   'custom-prompt': cmdCustomPrompt,
   help: cmdHelp,
   '-h': cmdHelp,
