@@ -43,6 +43,7 @@ import {
   resolveTemplatesDir,
   resolveSourceTemplatesDir,
   resolveSourceTemplatesInfo,
+  overrideTemplatesDir,
   TEMPLATES_DIR_ENV,
   stateDir,
 } from '../lib/paths.js';
@@ -182,14 +183,16 @@ function cmdApply() {
 
 // ── revert ──────────────────────────────────────────────
 
-function cmdRevert() {
+async function cmdRevert() {
   printBanner();
-  const out = revert();
-  if (!out.removed.length && !out.restored.length) {
+  const out = await revert();
+  const empty = !out.removed.length && !out.restored.length && !(out.guardCleared || []).length;
+  if (empty) {
     console.log(paint(C.yellow, '· 没有发现需要回滚的内容（未安装或已回滚）。'));
   } else {
     for (const r of out.removed) console.log(paint(C.green, '✓ 已移除 ') + r);
     for (const r of out.restored) console.log(paint(C.green, '✓ 已还原 ') + r);
+    for (const g of out.guardCleared || []) console.log(paint(C.green, '✓ 已撤销屏蔽 ') + g);
   }
   console.log('');
   console.log(paint(C.gray, `  如果之前设过环境变量 ${TEMPLATES_DIR_ENV}，记得删掉：`));
@@ -211,6 +214,25 @@ function cmdStatus() {
     return 0;
   }
   printBanner();
+
+  // 完全没装过：直接给结论，不逐条列 pending（那会让人以为装坏了）
+  if (!st.installed) {
+    console.log(paint(C.yellow, '  状态：尚未安装'));
+    console.log('');
+    console.log(`  官方安装体目录  : ${st.installTemplatesDir || paint(C.yellow, '(未找到)')}`);
+    console.log(`  环境变量        : ${st.envVar} = ${st.envValue || paint(C.gray, '(未设置)')}`);
+    console.log('');
+    console.log('  下一步：');
+    console.log(paint(C.cyan, '    node bin/workbb.js apply'));
+    if (st.installTemplatesDir) {
+      console.log(paint(C.gray, `    探测到了安装体，应可直接成功`));
+    } else {
+      console.log(paint(C.gray, `    若自动探测失败，加 --templates-dir "<安装根>/resources/app.asar.unpacked/resources/templates"`));
+    }
+    console.log('');
+    return 0;
+  }
+
   console.log(`  模式            : ${st.mode}`);
   console.log(`  环境变量        : ${st.envVar} = ${st.envValue || paint(C.yellow, '(未设置)')}`);
   console.log(`  生效模板目录    : ${st.envActive ? (st.activeTemplatesDir || paint(C.yellow, '(未解析到)')) : paint(C.yellow, '(env 未生效，见下方提要)')}`);
@@ -242,7 +264,11 @@ function cmdStatus() {
 // ── verify ──────────────────────────────────────────────
 
 function cmdVerify() {
-  const dir = arg('--dir') || resolveTemplatesDir() || overrideRoot();
+  // 校验对象必须是「我们生成/安装的那份」：
+  //   显式 --dir > 已生效的定制目录 > 我们自己的 overrideRoot
+  // 不能回落到 resolveTemplatesDir()，因为 env 没设时它会指向安装体的原版，
+  // 那上面当然还有原策略段 —— 会误报一堆残留。
+  const dir = arg('--dir') || (overrideTemplatesDir() && resolveTemplatesDir()) || overrideRoot();
   printBanner();
   if (!fs.existsSync(dir)) {
     console.error(paint(C.red, `✗ 目录不存在：${dir}`));
@@ -284,7 +310,12 @@ function cmdDoctor() {
   }
   console.log('');
   if (d.ok) {
-    console.log(paint(C.green, '✓ 环境检查通过'));
+    console.log(paint(C.green, '✓ 硬性检查全部通过'));
+    if (!d.envActive) {
+      console.log('');
+      console.log(paint(C.yellow, '  待办：当前进程尚未接管模板目录'));
+      console.log(paint(C.gray, '    走启动器启动，或 setx 后完全退出（含托盘）再启动 WorkBuddy'));
+    }
   } else {
     console.log(paint(C.yellow, '! 有检查未通过，按上面提示修复后再 apply'));
   }

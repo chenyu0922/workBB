@@ -487,12 +487,15 @@ function rebuildMirror(sourceDir) {
     fs.cpSync(s, path.join(dst, sub), { recursive: true });
   }
 
-  // include 依赖：plugins/workbuddy-builtin
+  // include 依赖：只复制 prompt-common（整个 workbuddy-builtin 有 40 MB，无关内容太多）
   const fragSrc = path.join(sourceDir, '..', 'plugins', 'workbuddy-builtin');
   if (fs.existsSync(fragSrc)) {
     const fragDst = path.join(dst, '..', 'plugins', 'workbuddy-builtin');
     fs.rmSync(fragDst, { recursive: true, force: true });
-    fs.cpSync(fragSrc, fragDst, { recursive: true });
+    for (const sub of ['prompt-common', '.codebuddy-plugin', '.workbuddy-plugin']) {
+      const s = path.join(fragSrc, sub);
+      if (fs.existsSync(s)) fs.cpSync(s, path.join(fragDst, sub), { recursive: true });
+    }
   }
 
   return report;
