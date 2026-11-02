@@ -33,7 +33,7 @@ $OutputEncoding = $Script:UA
 function Say([string]$msg, [string]$color = 'Gray') {
     Write-Host $msg -ForegroundColor $color
 }
-function Step([int]$n, [string]$title) {
+function Step($n, [string]$title) {
     Write-Host ""
     Write-Host ("[{0}] {1}" -f $n, $title) -ForegroundColor Cyan
     Write-Host ("-" * 60) -ForegroundColor DarkGray
@@ -160,11 +160,34 @@ if (!(Test-Path $AsarPath)) {
     $AsarPath2 = Join-Path $InstallRoot 'app.asar'
     if (Test-Path $AsarPath2) { $AsarPath = $AsarPath2 }
 }
-if (-not (Test-Path $AsarPath)) {
-    Fail "找不到 app.asar"
+
+if (Test-Path $AsarPath) {
+    Ok "app.asar: $AsarPath"
+} else {
+    # 没有 app.asar 也能继续：可能已被移走（解包形态），或安装结构不同
+    Warn "未找到 app.asar（可能已是解包形态，或被移走）"
+    $AsarPath = $null
+}
+
+# 无论有没有 asar，都必须能找到模板；否则无从下手
+$diskTplDir = Join-Path $InstallRoot 'resources\app.asar.unpacked\resources\templates'
+$diskTpl = Join-Path $diskTplDir 'workbuddy-prompt.tpl'
+$diskTpl2Dir = Join-Path $InstallRoot 'resources\templates'
+$diskTpl2 = Join-Path $diskTpl2Dir 'workbuddy-prompt.tpl'
+
+if ($AsarPath) {
+    Ok "存在 app.asar，稍后判断模板在 asar 内还是磁盘上"
+} elseif ((Test-Path $diskTpl) -or (Test-Path $diskTpl2)) {
+    Ok "无 app.asar，但磁盘上有模板（纯解包形态）"
+} else {
+    Fail "既找不到 app.asar，磁盘上也没有模板"
+    Info "已检查："
+    Info "  $AsarPath"
+    Info "  $diskTpl"
+    Info "  $diskTpl2"
+    Info "请带 -InstallRoot 指定正确的安装根"
     exit 1
 }
-Ok "app.asar: $AsarPath"
 
 # ════════════════════════════════════════════════════════
 #  卸载路径
@@ -207,42 +230,49 @@ if ($Uninstall) {
 # ════════════════════════════════════════════════════════
 Step 1 "判断 asar 形态"
 
-# 用 node 直接判断形态，解析 JSON 而非中文输出
-$probeJs = @'
-import fs from 'node:fs';
-const asarPath = process.argv[2];
-const raw = fs.readFileSync(asarPath);
-const jsonLen = raw.readUInt32LE(12);
-const header = JSON.parse(raw.slice(16, 16 + jsonLen).toString());
-function get(n, parts) { let x = n; for (const p of parts) { x = x && x.files && x.files[p]; if (!x) return null; } return x; }
-const e = get(header, ['resources','templates','workbuddy-prompt.tpl']);
-if (!e) { console.log(JSON.stringify({ result: 'absent' })); process.exit(0); }
-console.log(JSON.stringify({ result: e.unpacked ? 'unpacked' : 'packed' }));
-'@
-
-$probePath = Join-Path $env:TEMP ('workbb-probe-' + [guid]::NewGuid().ToString('N') + '.mjs')
-$probeJs | Out-File -FilePath $probePath -Encoding UTF8
-try {
-    $probeRaw = & $nodeExe $probePath $AsarPath 2>&1 | Out-String
-} finally {
-    Remove-Item $probePath -Force -ErrorAction SilentlyContinue
+# 判断形态：直接读 asar header 的字节（纯 PowerShell，不用 node 也不用 here-string）
+function Get-AsarEntryMode([string]$asarFile, [string]$entryPath) {
+    try {
+        $fs = [System.IO.File]::OpenRead($asarFile)
+        try {
+            $hdr = New-Object byte[] 16
+            $fs.Read($hdr, 0, 16) | Out-Null
+            $jsonLen = [BitConverter]::ToUInt32($hdr, 12)
+            $jb = New-Object byte[] $jsonLen
+            $fs.Read($jb, 0, $jsonLen) | Out-Null
+            $json = [System.Text.Encoding]::UTF8.GetString($jb)
+            $obj = $json | ConvertFrom-Json
+            $node = $obj
+            foreach ($part in $entryPath.Split('/')) {
+                if (-not $node.files) { return 'absent' }
+                $node = $node.files.$part
+                if (-not $node) { return 'absent' }
+            }
+            if ($node.unpacked) { return 'unpacked' } else { return 'packed' }
+        } finally { $fs.Dispose() }
+    } catch {
+        return 'error'
+    }
 }
 
-$probe = $null
-try { $probe = $probeRaw.Trim() | ConvertFrom-Json } catch { }
-
-if (-not $probe -or $probe.result -eq 'absent') {
-    Fail "app.asar 内找不到 resources/templates/workbuddy-prompt.tpl"
-    Info "该 asar 结构异常，或版本差异导致路径不同。"
-    Info "可先用 workbbinworkbb.js sealed status --root <安装根> 查看详情"
-    exit 1
-}
-
-if ($probe.result -eq 'packed') {
-    Ok "密封态 (packed) -- templates inside app.asar"
-    $Mode = 'sealed'
+if ($AsarPath) {
+    $tplMode = Get-AsarEntryMode $AsarPath 'resources/templates/workbuddy-prompt.tpl'
+    if ($tplMode -eq 'packed') {
+        Ok "密封态 (packed) -- templates inside app.asar"
+        $Mode = 'sealed'
+    } elseif ($tplMode -eq 'unpacked') {
+        Ok "已解包态 (unpacked) -- templates on disk"
+        $Mode = 'unpacked'
+    } elseif ($tplMode -eq 'absent') {
+        Fail "app.asar 内找不到 resources/templates/workbuddy-prompt.tpl"
+        Info "该 asar 结构异常，或版本差异导致路径不同"
+        exit 1
+    } else {
+        Fail "读取 app.asar 失败（文件可能损坏或被占用）"
+        exit 1
+    }
 } else {
-    Ok "已解包态 (unpacked) -- templates on disk"
+    Ok "无 app.asar -> 按磁盘解包形态处理 (unpacked)"
     $Mode = 'unpacked'
 }
 
@@ -260,7 +290,19 @@ try {
         $step2Code = $LASTEXITCODE
     } else {
         Info "已解包态 → 从磁盘复制模板到用户目录"
-        $rawOut2 = $(& $nodeExe 'bin\workbb.js' 'apply' 2>&1 | Out-String)
+        # 显式指定源目录，避免自动探测在这台机器上找错
+        $srcDir = $null
+        if (Test-Path (Join-Path $InstallRoot 'resources\app.asar.unpacked\resources\templates\workbuddy-prompt.tpl')) {
+            $srcDir = Join-Path $InstallRoot 'resources\app.asar.unpacked\resources\templates'
+        } elseif (Test-Path (Join-Path $InstallRoot 'resources\templates\workbuddy-prompt.tpl')) {
+            $srcDir = Join-Path $InstallRoot 'resources\templates'
+        }
+        if ($srcDir) {
+            Info "源模板目录: $srcDir"
+            $rawOut2 = $(& $nodeExe 'bin\workbb.js' 'apply' '--templates-dir' $srcDir 2>&1 | Out-String)
+        } else {
+            $rawOut2 = $(& $nodeExe 'bin\workbb.js' 'apply' 2>&1 | Out-String)
+        }
         $out = $rawOut2
         $step2Code = $LASTEXITCODE
     }
@@ -391,6 +433,31 @@ if (Test-Path $launcher) {
 }
 
 # ════════════════════════════════════════════════════════
+#  6.5 ★ 设置用户级环境变量（关键：保证双击原图标也生效）
+# ════════════════════════════════════════════════════════
+Step "6.5" "设置用户级环境变量（关键）"
+
+$tplDirFinal = Join-Path $env:USERPROFILE '.workbuddy\workbb\templates'
+$envKey = 'WORKBUDDY_PROMPT_TEMPLATES_DIR'
+
+if (Test-Path $tplDirFinal) {
+    [Environment]::SetEnvironmentVariable($envKey, $tplDirFinal, 'User')
+    $readback = [Environment]::GetEnvironmentVariable($envKey, 'User')
+    if ($readback -eq $tplDirFinal) {
+        Ok "已设置用户级环境变量"
+        Info "$envKey = $tplDirFinal"
+        Info "从此双击原图标也会生效，不必依赖启动器"
+    } else {
+        Fail "环境变量写入失败（读回: $readback）"
+        Warn "可手工设置：setx $envKey \"$tplDirFinal\""
+    }
+    # 同时设到当前进程，方便后续步骤校验
+    $env:WORKBUDDY_PROMPT_TEMPLATES_DIR = $tplDirFinal
+} else {
+    Fail "模板目录不存在，未设置环境变量: $tplDirFinal"
+}
+
+# ════════════════════════════════════════════════════════
 #  7. 最终状态
 # ════════════════════════════════════════════════════════
 Step 7 "最终状态"
@@ -418,22 +485,26 @@ Say "============================================================" -ForegroundCo
 Say "  安装完成" -ForegroundColor Green
 Say "============================================================" -ForegroundColor Green
 Say ""
-Say "  最后一步（必须做）：" -ForegroundColor Yellow
+Say "  最后一步（必须做，只有一次）：" -ForegroundColor Yellow
 Say ""
-Say "  1) 完全退出 WorkBuddy —— 含托盘图标右键退出，只关窗口不算"
-Say "     Get-Process WorkBuddy -EA SilentlyContinue | Stop-Process -Force"
+Say "  环境变量已经设好，但【当前正在运行的 WorkBuddy 还读着旧模板】。"
+Say "  必须完全退出再启动，它才会用新模板。"
 Say ""
-Say "  2) 用这个启动器打开（不要用原图标）：" -ForegroundColor White
-Say "     $launcher"
+Say "  1) 完全退出 WorkBuddy —— 托盘图标也要右键退出，只关窗口不算"
+Say "     Get-Process WorkBuddy,workbuddy-api -EA SilentlyContinue | Stop-Process -Force"
 Say ""
-Say "  3) 新开 PowerShell 验证："
+Say "  2) 之后用哪个图标启动都行（原图标、开始菜单、桌面快捷方式都可以）"
+Say "     因为环境变量是用户级的，对所有进程生效。"
+Say ""
+Say "  3) 启动后验证："
 Say "     cd `"$WorkBB`""
 Say "     node bin\workbb.js status"
-Say "     看「生效模板目录」是否指向 .workbuddy\workbb\templates"
+Say "     要求看到：生效模板目录 = ...\.workbuddy\workbb\templates"
 Say ""
-Say "  想固定生效（不用每次点启动器）：" -ForegroundColor DarkGray
-Say "     setx WORKBUDDY_PROMPT_TEMPLATES_DIR `"$env:USERPROFILE\.workbuddy\workbb\templates`""
-Say "     然后完全退出 WorkBuddy 再启动"
+Say "  如果第 3 步仍显示「env 未生效」：" -ForegroundColor Yellow
+Say "     说明 WorkBuddy 没继承到环境变量。两个办法："
+Say "     a) 重启这台电脑（最彻底）"
+Say "     b) 改用启动器： $launcher"
 Say ""
 Say "  卸载： .\install.ps1 -Uninstall" -ForegroundColor DarkGray
 Say ""
