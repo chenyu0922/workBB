@@ -602,7 +602,8 @@ function cmdIdentity() {
 
   if (action === 'install') {
     const force = has('--force');
-    const r = installIdentityFiles({ presetRoot: root, force });
+    const upgradeSeed = !has('--no-seed-memory');
+    const r = installIdentityFiles({ presetRoot: root, force, upgradeSeed });
     console.log(`  目标目录 : ${r.target}`);
     console.log('');
     if (r.installed.length) {

@@ -508,6 +508,13 @@ $identityDir = Join-Path $env:USERPROFILE '.workbuddy'
 $soulPath = Join-Path $identityDir 'SOUL.md'
 if (Test-Path $soulPath) {
     Ok "SOUL.md 就位（官方授予最高人格优先级）"
+    # MEMORY.md 若只是早期种子，会自动升级为完整工程记忆版
+    $memFile = Join-Path $identityDir 'MEMORY.md'
+    if (Test-Path $memFile) {
+        $memSize = (Get-Item $memFile).Length
+        Info "MEMORY.md $memSize B"
+        if ($memSize -lt 800) { Warn "MEMORY.md 仍很薄，可能没升级成功" }
+    }
     Info "WorkBuddy 模板原文："
     Info "  If SOUL.md is present, embody its persona and tone completely"
     Info "  ...it outranks the default persona here."
