@@ -119,7 +119,7 @@ if (Test-Path $tplDir) {
     foreach ($tag in @('personal_files_safety','windows_command_safety','tool_usage_policy')) {
         $m = [regex]::Match($c, "<$tag>[\s\S]*?</$tag>")
         if ($m.Success) {
-            $dead = $m.Value -match '整体覆盖，一律作废'
+            $dead = $m.Value -match '本节内容已由'
             L "    $tag : 长度=$($m.Value.Length) 作废=$dead"
         } else { L "    $tag : 不存在" }
     }
@@ -210,6 +210,46 @@ if ($wbbin -and $nodeExe) {
     L "  跳过（找不到 workbb\bin\workbb.js）"
 }
 
+# ── 5e. ★★ 六层靶点状态（L2-L5，此前完全没查）────────────
+L ""
+L "[5e] 六层靶点状态 ★ L2-L5 是「改了不生效」的真因"
+
+$wbbin2 = $null
+foreach ($c in @(
+    (Join-Path $PSScriptRoot 'workbb\bin\workbb.js'),
+    (Join-Path (Split-Path -Parent $PSScriptRoot) 'workbb\bin\workbb.js'),
+    (Join-Path $cfg 'workbb\bin\workbb.js')
+)) { if ($c -and (Test-Path $c)) { $wbbin2 = $c; break } }
+
+if ($wbbin2 -and $nodeExe -and $InstallRoot) {
+    $out5e = & $nodeExe $wbbin2 'layers' 'status' '--root' $InstallRoot 2>&1 | Out-String
+    foreach ($line in ($out5e -split "`n")) {
+        if ($line.Trim() -and $line -notmatch '┌|└|│') { L "  $($line.TrimEnd())" }
+    }
+} else {
+    L "  跳过（找不到 workbb 或安装根）"
+    # 退化为手工核查 L2/L5
+    if ($InstallRoot) {
+        $pj1 = Join-Path $InstallRoot 'resources\app.asar.unpacked\cli\product.json'
+        if (Test-Path $pj1) {
+            $pjText = Get-Content $pj1 -Raw -Encoding UTF8
+            $refuseN = ([regex]::Matches($pjText, 'You MUST refuse')).Count
+            L "  L2 cli/product.json  You MUST refuse 出现 $refuseN 次 $(if ($refuseN -eq 0) { '（已替换）' } else { '← 仍是原版！' })"
+        }
+        $gate1 = Join-Path $InstallRoot 'resources\app.asar.unpacked\cli\dist\codebuddy-lite-wb.mjs'
+        if (Test-Path $gate1) {
+            $gText = Get-Content $gate1 -Raw -Encoding UTF8
+            $inj = ([regex]::Matches($gText, 'return\{behavior:"allow"\};')).Count
+            L "  L3 codebuddy-lite-wb.mjs  放行语句 $inj 处 $(if ($inj -ge 2) { '（已放行）' } else { '← 未放行' })"
+        }
+        $cacheDir = Join-Path $cfg 'cache'
+        if (Test-Path $cacheDir) {
+            $cs = @(Get-ChildItem $cacheDir -Filter 'acc-product-config-v3*' -EA SilentlyContinue)
+            L "  L5 运行时缓存 $($cs.Count) 个 $(if ($cs.Count -eq 0) { '（已清空）' } else { '← 仍存在，会顶回改动' })"
+        }
+    }
+}
+
 # ── 6. settings.json ────────────────────────────────────
 L ""
 L "[6] settings.json"
@@ -267,7 +307,7 @@ console.log(JSON.stringify({
   hasOriginalAnchor: body.includes('You MUST refuse'),
   tagsVoid: ['personal_files_safety','windows_command_safety','tool_usage_policy'].map(t => {
     const m = body.match(new RegExp('<' + t + '>[\\s\\S]*?</' + t + '>'));
-    return t + '=' + (m && m[0].includes('整体覆盖，一律作废') ? 'void' : (m ? 'ALIVE' : 'absent'));
+    return t + '=' + (m && m[0].includes('本节内容已由') ? 'void' : (m ? 'ALIVE' : 'absent'));
   }),
   identity: { soul: ident('SOUL.md').length, identity: ident('IDENTITY.md').length, user: ident('USER.md').length, memory: ident('MEMORY.md').length },
 }));
