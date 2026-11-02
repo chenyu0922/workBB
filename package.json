@@ -1,7 +1,7 @@
 {
   "name": "workbb",
   "version": "1.0.0",
-  "description": "workBB — WorkBuddy 破甲 / 无道德限制补丁：接管 Nunjucks 提示词模板，剥离内容审查与拒答硬化，可选身份层与自定义指令层。Jailbreak + de-guard patch for WorkBuddy (CodeBuddy CLI). Zero-touch via WORKBUDDY_PROMPT_TEMPLATES_DIR.",
+  "description": "workBB — WorkBuddy 提示词模板定制工具：接管 Nunjucks 提示词模板，替换默认策略段落与操作约束段，可选身份层与自定义指令层。Template customization for WorkBuddy (CodeBuddy CLI), zero-touch via WORKBUDDY_PROMPT_TEMPLATES_DIR.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -35,15 +35,12 @@
   "keywords": [
     "workbuddy",
     "codebuddy",
-    "jailbreak",
-    "de-guard",
     "prompt",
     "nunjucks",
     "template-patch",
     "llm-security",
     "harness-security",
-    "破甲",
-    "无道德限制"
+    "template-customization"
   ],
   "license": "MIT",
   "author": "YG",

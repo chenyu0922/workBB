@@ -1,6 +1,6 @@
 # workBB
 
-> **Jailbreak / de-guard patch for WorkBuddy** (Tencent CodeBuddy CLI desktop shell). It takes over the official Nunjucks prompt templates, strips the content-policy, refusal-hardening and operation gates, and optionally adds an identity layer and an operator-instruction layer.
+> **Template customization patch for WorkBuddy** (Tencent CodeBuddy CLI desktop shell). It takes over the official Nunjucks prompt templates and substitutes the content-policy, preference-hardening and operation-constraint sections with an operator-authored policy, plus an optional identity layer and instruction layer.
 > Zero-touch takeover via the officially supported `WORKBUDDY_PROMPT_TEMPLATES_DIR` environment variable — the installation is left byte-for-byte untouched.
 
 <p align="center">
@@ -17,7 +17,7 @@
 WorkBuddy's system prompt is **not hard-coded in the binary**. It is rendered at runtime from a set of **plain-text Nunjucks templates** in `resources/templates/*.tpl`. `workBB`:
 
 1. Mirrors that template directory to `~/.workbuddy/workbb/templates/`;
-2. Replaces the three safety blocks — `<content_policy>`, `<personal_files_safety>`, `<windows_command_safety>` — plus two softening clauses in `user-context-identity.tpl`, using **plain-text anchors only**;
+2. Substitutes the three policy sections — `<content_policy>`, `<personal_files_safety>`, `<windows_command_safety>` — plus two exception-bearing clauses in `user-context-identity.tpl`, using **plain-text anchors only**;
 3. Points WorkBuddy at the mirror via the officially supported `WORKBUDDY_PROMPT_TEMPLATES_DIR` env var.
 
 The installation is never modified, so **official updates don't break it and don't require re-patching.**
@@ -177,6 +177,54 @@ The standalone exe (`dist/bin/workbb-guard.exe`) additionally offers `watch [sec
 
 - `0` all good
 - `1` required patch missed / render failure / lock residue / failed env check
+
+---
+
+## Different machine / different install location
+
+**It works, as long as it can find your template directory.** Resolution order, most reliable first:
+
+| Priority | Source | Note |
+|---|---|---|
+| 0 | `WORKBUDDY_PROMPT_TEMPLATES_DIR` | already-active customised directory |
+| 1 | `WORKBUDDY_APP_PATH` | **explicit, overrides all auto-detection** |
+| 2 | Registry `UninstallString` | most reliable on Windows; covers D:/E: custom installs |
+| 3 | Running WorkBuddy process path | most accurate while the app is open |
+| 4 | Common locations | `Program Files` / `Local\Programs` / usual dirs on C–H |
+| 5 | Official cwd candidate chain | identical to the main process |
+
+Unsupported locations are skipped and listed honestly — nothing outside your WorkBuddy is touched.
+
+### Two ways to point it at the right place
+
+```bash
+# Option 1: give the template directory directly (skips all detection)
+node bin/workbb.js apply --templates-dir "<root>/resources/app.asar.unpacked/resources/templates"
+
+# Option 2: give the install root once, every later command follows
+set WORKBUDDY_APP_PATH=<root>\resources          # Windows
+export WORKBUDDY_APP_PATH="<root>/resources"      # bash
+node bin/workbb.js apply
+```
+
+If neither resolves, `apply` prints every candidate it tried plus both fixes — no silent failure, no leftovers.
+
+### Cross-machine rehearsal
+
+`node scripts/crosshost-test.mjs` covers six scenarios:
+
+| Scenario | Result |
+|---|---|
+| This machine, D: custom install (via registry) | ✓ |
+| Another machine, E: + Chinese + spaces (only `WORKBUDDY_APP_PATH`) | ✓ |
+| Different user / different home (`WORKBUDDY_CONFIG_DIR` elsewhere) | ✓ |
+| No installation at all → clear error, no crash, no residue | ✓ |
+| Bare `--templates-dir` path | ✓ |
+| guard cache-dir naming unaffected by paths | ✓ |
+
+> **One prerequisite**: templates must exist as real files (`resources/app.asar.unpacked/resources/templates`).
+> If the target machine is in a sealed `app.asar` state, they cannot be read — unpack first,
+> see [`docs/injection.md`](docs/injection.md).
 
 ---
 

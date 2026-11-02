@@ -179,5 +179,5 @@ for (const f of FILES) {
   }
 }
 
-console.log(fail ? `\n!! ${fail} 项未通过` : '\n官方引擎渲染全部通过：无安全锁残留');
+console.log(fail ? `\n!! ${fail} 项未通过` : '\n官方引擎渲染全部通过：无策略段残留');
 process.exitCode = fail ? 1 : 0;

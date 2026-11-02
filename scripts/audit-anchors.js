@@ -19,7 +19,7 @@ for (const p of ALL_PATCHES) {
   console.log(`${p.id.padEnd(5)}${p.layer.padEnd(7)}${String(hits.length).padEnd(6)}${p.name}${mark}`);
 }
 
-console.log('\n=== 逐文件：替换后是否残留安全锁 ===');
+console.log('\n=== 逐文件：替换后是否残留策略段 ===');
 const residue = [/MUST refuse/, /content_policy>[\s\S]{0,400}?MUST refuse/, /unless they conflict with safety rules/];
 for (const f of files) {
   const txt = fs.readFileSync(path.join(DIR, f), 'utf8');

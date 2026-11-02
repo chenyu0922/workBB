@@ -1,6 +1,6 @@
 # 注入机制详解
 
-workBB 用**三层互不排斥**的通道让 WorkBuddy 加载破甲提示词。任何一层失效，另外两层仍在。
+workBB 用**三层互不排斥**的通道让 WorkBuddy 加载模板定制提示词。任何一层失效，另外两层仍在。
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -152,7 +152,7 @@ workBB 的 D1 补丁把这段里的 `unless they conflict with safety rules` 例
 - 官方某次改版把 `WORKBUDDY_PROMPT_TEMPLATES_DIR` 读法改掉
 - 镜像目录被误删
 
-而此时层 3 依然通过 settings.json 注入 —— 提示词里仍然有完整的放行指令，不会裸奔。
+而此时层 3 依然通过 settings.json 注入 —— 提示词里仍有完整的操作约定，不会退化。
 
 ---
 
@@ -168,7 +168,7 @@ workBB 的 D1 补丁把这段里的 `unless they conflict with safety rules` 例
 ✓ workbuddy-expert-prompt.tpl         31181 B  locks=0  release=true
 ```
 
-`locks=0` 表示安全锁语句一条不剩，`release=true` 表示放行段确实进了 prompt。
+`locks=0` 表示策略段原句一条不剩，`release=true` 表示操作约定段确实进了 prompt。
 
 ---
 

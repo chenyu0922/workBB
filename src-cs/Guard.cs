@@ -480,7 +480,7 @@ namespace WorkBBGuard
         {
             Console.WriteLine();
             Console.WriteLine("  ┌──────────────────────────────────────────────┐");
-            Console.WriteLine("  │  workBB-Guard " + Version + " (C#)   WorkBuddy 升级屏蔽  │");
+            Console.WriteLine("  │  workBB-Guard " + Version + " (C#)   WorkBuddy 更新屏蔽  │");
             Console.WriteLine("  └──────────────────────────────────────────────┘");
             Console.WriteLine();
         }

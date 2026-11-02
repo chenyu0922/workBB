@@ -28,7 +28,6 @@ import {
   status,
   doctor,
   readState,
-  resolveSourceTemplatesDir,
 } from '../lib/index.js';
 import { verifyTemplates, createEnv, baselineVars, PROMPT_TEMPLATE_FILES } from '../lib/verify.js';
 import {
@@ -39,7 +38,14 @@ import {
   guessExePaths,
   settingsPath,
 } from '../lib/inject.js';
-import { overrideRoot, resolveTemplatesDir, TEMPLATES_DIR_ENV, stateDir } from '../lib/paths.js';
+import {
+  overrideRoot,
+  resolveTemplatesDir,
+  resolveSourceTemplatesDir,
+  resolveSourceTemplatesInfo,
+  TEMPLATES_DIR_ENV,
+  stateDir,
+} from '../lib/paths.js';
 import {
   installGuard,
   removeGuard,
@@ -87,7 +93,7 @@ function has(flag) {
 function printBanner() {
   console.log('');
   console.log(paint(C.cyan, '  ┌─────────────────────────────────────────────┐'));
-  console.log(paint(C.cyan, '  │') + paint(C.bold, '  workBB ') + paint(C.gray, `v${WORKBB_VERSION}`) + '  WorkBuddy 破甲补丁  ' + paint(C.cyan, '│'));
+  console.log(paint(C.cyan, '  │') + paint(C.bold, '  workBB ') + paint(C.gray, `v${WORKBB_VERSION}`) + '  WorkBuddy 模板定制  ' + paint(C.cyan, '│'));
   console.log(paint(C.cyan, '  └─────────────────────────────────────────────┘'));
   console.log('');
 }
@@ -101,9 +107,25 @@ function cmdApply() {
   const src = templatesDir || resolveSourceTemplatesDir();
 
   if (!src) {
-    console.error(paint(C.red, '✗ 找不到 WorkBuddy 模板目录。'));
-    console.error('  用 --templates-dir <路径> 显式指定，例如：');
-    console.error('    workbb apply --templates-dir "D:/WorkBuddy/resources/app.asar.unpacked/resources/templates"');
+    const info = resolveSourceTemplatesInfo();
+    console.error(paint(C.red, '✗ 找不到 WorkBuddy 的模板目录。'));
+    console.error('');
+    console.error('  已尝试以下位置（都不存在 workbuddy-prompt.tpl）：');
+    for (const p of info.searched.slice(0, 12)) console.error('    ' + p);
+    if (info.searched.length > 12) console.error(`    ...共 ${info.searched.length} 个候选`);
+    console.error('');
+    console.error('  两种解法：');
+    console.error('    1) 显式指定模板目录：');
+    console.error('       workbb apply --templates-dir "<安装根>/resources/app.asar.unpacked/resources/templates"');
+    console.error('    2) 指定安装根（之后所有命令都会用它）：');
+    if (process.platform === 'win32') {
+      console.error('       set WORKBUDDY_APP_PATH=<安装根>\\resources');
+    } else {
+      console.error('       export WORKBUDDY_APP_PATH="<安装根>/resources"');
+    }
+    console.error('');
+    console.error(paint(C.gray, '  提示：若模板被打包在 app.asar 里（无 app.asar.unpacked），'));
+    console.error(paint(C.gray, '        需先解包，详见 docs/injection.md。'));
     return 1;
   }
 
@@ -191,7 +213,10 @@ function cmdStatus() {
   printBanner();
   console.log(`  模式            : ${st.mode}`);
   console.log(`  环境变量        : ${st.envVar} = ${st.envValue || paint(C.yellow, '(未设置)')}`);
-  console.log(`  生效模板目录    : ${st.activeTemplatesDir || paint(C.yellow, '(未解析到)')}`);
+  console.log(`  生效模板目录    : ${st.envActive ? (st.activeTemplatesDir || paint(C.yellow, '(未解析到)')) : paint(C.yellow, '(env 未生效，见下方提要)')}`);
+  if (!st.envActive) {
+    console.log(paint(C.gray, `    WorkBuddy 当前仍读安装体；需导出 ${TEMPLATES_DIR_ENV} 或用 launcher 启动`));
+  }
   console.log(`  官方安装体目录  : ${st.installTemplatesDir || paint(C.yellow, '(未找到)')}`);
   console.log(`  状态文件        : ${st.stateFileExists ? st.stateFile || stateDir() : paint(C.yellow, '(无)')}`);
   console.log(`  安装时间        : ${st.installedAt || '-'}`);
@@ -231,11 +256,11 @@ function cmdVerify() {
     if (x.status === 'render-error') { console.log(paint(C.red, `  ✗ ${x.file.padEnd(36)} 渲染失败: ${x.error.split('\n')[0]}`)); continue; }
     const lockOk = x.lockResidue === 0;
     const mark = lockOk ? paint(C.green, '✓') : paint(C.red, '✗');
-    console.log(`  ${mark} ${x.file.padEnd(36)} ${String(x.bytes).padStart(7)} B  lock残留=${x.lockResidue}${x.hasReleaseBlock ? paint(C.green, '  [放行段已注入]') : ''}`);
+    console.log(`  ${mark} ${x.file.padEnd(36)} ${String(x.bytes).padStart(7)} B  原句残留=${x.lockResidue}${x.hasReleaseBlock ? paint(C.green, '  [操作约定已注入]') : ''}`);
   }
   console.log('');
   if (r.ok) {
-    console.log(paint(C.green, '✓ 全部通过：无渲染错误，无安全锁残留'));
+    console.log(paint(C.green, '✓ 全部通过：无渲染错误，无策略段残留'));
     console.log('');
     return 0;
   }
@@ -243,7 +268,7 @@ function cmdVerify() {
     console.log(paint(C.red, `✗ ${r.failing.length} 个模板渲染失败`));
   }
   if (r.locky.length) {
-    console.log(paint(C.red, `✗ ${r.locky.length} 个模板仍残留安全锁：${r.locky.map((x) => x.file).join(', ')}`));
+    console.log(paint(C.red, `✗ ${r.locky.length} 个模板仍残留策略段：${r.locky.map((x) => x.file).join(', ')}`));
   }
   console.log('');
   return 1;
@@ -521,7 +546,7 @@ function cmdHelp() {
   console.log('      heal     官方升级后自动重打补丁');
   console.log('');
   console.log('  workbb verify [--dir <路径>]');
-  console.log('      Nunjucks 离线渲染校验：无语法错误 + 无安全锁残留');
+  console.log('      Nunjucks 离线渲染校验：无语法错误 + 无策略段残留');
   console.log('');
   console.log('  workbb status [--json]');
   console.log('  workbb doctor');

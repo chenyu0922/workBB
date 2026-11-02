@@ -18,7 +18,7 @@
 外加一层 **customPrompt**（`settings.json` 的 `personalization.customPrompt`）：
 它在配置目录里，升级不碰，所以即使 mirror 失效它也仍然生效。
 
-**结论：默认 mirror 模式下，官方升级不会让破甲失效。**
+**结论：默认 mirror 模式下，官方升级不会让模板定制失效。**
 真正需要防的是「升级过程本身」——它可能：
 - 弹「正在安装更新」过渡窗并强制 quit + 重启（打断你手上的活）
 - 覆盖安装体后，如果你曾用过 `--inplace`，补丁就没了
@@ -339,7 +339,7 @@ keys: sandbox, claw, enableModelOptimization, ..., personalization
 1. **服务端强制升级挡不住**。`runEarlyForceUpgradeCheck` 只看 feed 的 `forceUpdate`，
    配置层无效；要彻底挡需要代理层拦截 `/v2/update`（可按路径，不连坐登录）。
 2. **升级若真的发生**（用户手动装了新版）：
-   - mirror 模式下破甲仍在，但**新模板措辞变了会导致部分锚点失配** → 跑 `workbb guard heal`，
+   - mirror 模式下模板定制仍在，但**新模板措辞变了会导致部分锚点失配** → 跑 `workbb guard heal`，
      它会报哪几个文件漂移、重打了多少处，然后 `workbb verify` 确认 `locks=0`。
    - 若新版本改了模板路径/引擎，`workbb doctor` 会指出断点。
 3. **不要用 inplace 模式做长期部署**。那是「升级必丢」的形态，
