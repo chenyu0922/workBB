@@ -68,7 +68,7 @@ for (const e of fs.readdirSync(INSTALLER_SRC, { withFileTypes: true })) {
 const WB = path.join(OUT, 'workbb');
 copyDir(path.join(ROOT, 'bin'), path.join(WB, 'bin'), (s) => !s.endsWith('.cjs'));
 copyDir(path.join(ROOT, 'lib'), path.join(WB, 'lib'));
-copyDir(path.join(ROOT, 'presets'), path.join(WB, 'presets'));
+copyDir(path.join(ROOT, 'presets'), path.join(WB, 'presets')); // presets 整个目录（含 SOUL/IDENTITY/USER.md）
 fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(WB, 'package.json'));
 console.log('  bin/ lib/ presets/ package.json 已放入');
 

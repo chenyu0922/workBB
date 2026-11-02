@@ -493,6 +493,29 @@ if ($wbProcs.Count -gt 0) {
 }
 
 # ════════════════════════════════════════════════════════
+#  6.7 ★ 安装身份文件（SOUL / IDENTITY / USER）—— 被拒的关键缺失层
+# ════════════════════════════════════════════════════════
+Step "6.7" "安装身份文件（SOUL / IDENTITY / USER）"
+
+Push-Location $WorkBB
+try {
+    $iOut = & $nodeExe 'bin\workbb.js' 'identity' 'install' 2>&1 | Out-String
+    $iCode = $LASTEXITCODE
+} finally { Pop-Location }
+Write-Host $iOut -ForegroundColor DarkGray
+
+$identityDir = Join-Path $env:USERPROFILE '.workbuddy'
+$soulPath = Join-Path $identityDir 'SOUL.md'
+if (Test-Path $soulPath) {
+    Ok "SOUL.md 就位（官方授予最高人格优先级）"
+    Info "WorkBuddy 模板原文："
+    Info "  If SOUL.md is present, embody its persona and tone completely"
+    Info "  ...it outranks the default persona here."
+} else {
+    Warn "SOUL.md 未写入，可能权限不足"
+}
+
+# ════════════════════════════════════════════════════════
 #  7. 最终状态
 # ════════════════════════════════════════════════════════
 Step 7 "最终状态"

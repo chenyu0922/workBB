@@ -21,6 +21,11 @@ const __dirname = path.dirname(__filename);
 
 import { ALL_PATCHES, CONTENT_POLICY_REPLACEMENT } from '../lib/patches.js';
 import {
+  installIdentityFiles,
+  identityStatus,
+  uninstallIdentityFiles,
+} from '../lib/identity.js';
+import {
   WORKBB_VERSION,
   buildMirror,
   applyInplace,
@@ -568,6 +573,69 @@ function SETTING_LABEL(s) {
   return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
 }
 
+// ── identity（身份文件层）────────────────────────────────
+
+function cmdIdentity() {
+  const action = process.argv[3] || 'status';
+  printBanner();
+
+  const root = path.resolve(__dirname, '..', 'presets');
+
+  if (action === 'status') {
+    const s = identityStatus();
+    console.log(`  目录 : ${s.dir}`);
+    console.log('');
+    for (const r of s.rows) {
+      const mark = r.exists ? paint(C.green, '✓') : paint(C.yellow, '✗');
+      const size = r.exists ? `${String(r.bytes).padStart(7)} B` : paint(C.gray, '   缺失');
+      console.log(`  ${mark} ${r.name.padEnd(12)} ${size}`);
+    }
+    console.log('');
+    console.log(`  合计 : ${s.totalBytes} B   ${s.complete ? paint(C.green, '身份层完整') : paint(C.yellow, '身份层不完整')}`);
+    console.log('');
+    if (!s.complete) {
+      console.log(paint(C.gray, '  补齐：workbb identity install'));
+      console.log('');
+    }
+    return 0;
+  }
+
+  if (action === 'install') {
+    const force = has('--force');
+    const r = installIdentityFiles({ presetRoot: root, force });
+    console.log(`  目标目录 : ${r.target}`);
+    console.log('');
+    if (r.installed.length) {
+      console.log(paint(C.green, `✓ 已写入 ${r.installed.length} 个`));
+      for (const n of r.installed) console.log('    ' + n);
+    }
+    if (r.skipped.length) {
+      console.log(paint(C.gray, `  跳过 ${r.skipped.length} 个`));
+      for (const n of r.skipped) console.log(paint(C.gray, '    ' + n));
+    }
+    console.log('');
+    console.log(paint(C.gray, '  这些文件由官方模板 user-context-identity.tpl 注入，'));
+    console.log(paint(C.gray, '  官方明确写 SOUL.md 的人格优先级最高。'));
+    console.log(paint(C.gray, '  重启 WorkBuddy 后生效。'));
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'uninstall') {
+    const r = uninstallIdentityFiles();
+    if (!r.removed.length) console.log(paint(C.yellow, '· 没有可移除的文件'));
+    else {
+      console.log(paint(C.green, `✓ 已处理 ${r.removed.length} 个`));
+      for (const n of r.removed) console.log('    ' + n);
+    }
+    console.log('');
+    return 0;
+  }
+
+  console.log('用法: workbb identity status|install|uninstall [--force]');
+  return 1;
+}
+
 // ── sealed（密封态：直接改 app.asar）────────────────────
 
 async function cmdSealed() {
@@ -832,6 +900,7 @@ const table = {
   launcher: cmdLauncher,
   render: cmdRender,
   guard: cmdGuard,
+  identity: cmdIdentity,
   sealed: cmdSealed,
   'custom-prompt': cmdCustomPrompt,
   help: cmdHelp,
