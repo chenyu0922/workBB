@@ -12,3 +12,7 @@ workbb-notes/
 # C# 构建中间产物
 src-cs/obj/
 src-cs/bin/
+
+# 安装包构建中间产物（zip 本身也不入库，用 release 分发）
+dist/pkg/
+dist/workBB-sealed-installer.zip
