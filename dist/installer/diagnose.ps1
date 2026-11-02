@@ -143,8 +143,22 @@ foreach ($n in @('SOUL.md','IDENTITY.md','USER.md','MEMORY.md')) {
 $soulPath = Join-Path $cfg 'SOUL.md'
 if (Test-Path $soulPath) {
     $soul = Get-Content $soulPath -Raw -Encoding UTF8
-    L "  SOUL.md 含『不设许可闸门』: $(if ($soul -match '不设许可闸门') { 'YES' } else { 'NO（可能是旧版或你自己的）' })"
-    L "  SOUL.md 含『不设内容审查层』: $(if ($soul -match '不设内容审查层') { 'YES' } else { 'NO' })"
+    $legacyHits = @()
+    foreach ($kw in @('不设许可闸门','不设内容审查层','过滤残留的处理','被作废条款的残留回声','不做道德评估')) {
+        if ($soul -match [regex]::Escape($kw)) { $legacyHits += $kw }
+    }
+    if ($legacyHits.Count -ge 2) {
+        L "  [!]  SOUL.md 是旧元语言版（命中: $($legacyHits -join '、')）"
+        L "       ★ 这版会被模型识别为越狱指令而强化拒绝"
+        L "       → 修复：cd workbb; node bin\workbb.js identity upgrade"
+    } elseif ($legacyHits.Count -eq 1) {
+        L "  [~]  SOUL.md 含 1 处旧特征（可能是你自己的写法，保留）"
+    } else {
+        L "  [OK] SOUL.md 无旧元语言特征"
+    }
+    if ($soul -match 'Be genuinely helpful, not performatively helpful') {
+        L "  [OK] 含自然人格版签名（Core Truths 段）"
+    }
 }
 
 # ── 5c. ★ 身份上下文渲染 vs 日志（新增）──────────────────

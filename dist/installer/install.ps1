@@ -501,8 +501,22 @@ Push-Location $WorkBB
 try {
     $iOut = & $nodeExe 'bin\workbb.js' 'identity' 'install' 2>&1 | Out-String
     $iCode = $LASTEXITCODE
+
+    # ★ 自动升级：识别旧元语言版（v1 写的）并替换为自然人格版。
+    #   不加这步的话，installIdentityFiles 默认不覆盖已存在文件，
+    #   旧版会一直留着重装多少次都换不掉。
+    $uOut = & $nodeExe 'bin\workbb.js' 'identity' 'upgrade' 2>&1 | Out-String
+    $uCode = $LASTEXITCODE
 } finally { Pop-Location }
 Write-Host $iOut -ForegroundColor DarkGray
+
+if ($uOut -match '已升级') {
+    Write-Host $uOut -ForegroundColor Yellow
+    Ok "身份文件已升级（旧元语言版已替换为自然人格版）"
+    Info "原文件备份为 .workbb-backup，可随时还原"
+} else {
+    Write-Host $uOut -ForegroundColor DarkGray
+}
 
 $identityDir = Join-Path $env:USERPROFILE '.workbuddy'
 $soulPath = Join-Path $identityDir 'SOUL.md'

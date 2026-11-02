@@ -21,6 +21,7 @@ const __dirname = path.dirname(__filename);
 
 import { ALL_PATCHES, CONTENT_POLICY_REPLACEMENT } from '../lib/patches.js';
 import { report as whichReport } from '../lib/which-template.js';
+import { upgradeIdentityFiles, auditIdentityFiles } from '../lib/identity-upgrade.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -637,6 +638,7 @@ function cmdWhich() {
 function cmdIdentity() {
   const action = process.argv[3] || 'status';
   printBanner();
+  const presetRoot = path.resolve(__dirname, '..', 'presets');
 
   const root = path.resolve(__dirname, '..', 'presets');
 
@@ -658,6 +660,44 @@ function cmdIdentity() {
     }
     return 0;
   }
+  if (action === 'audit') {
+    const a = auditIdentityFiles();
+    console.log(`  目录 : ${a.dir}`);
+    console.log('');
+    for (const r of a.rows) {
+      const mark = r.state === '当前版' ? paint(C.green, '✓')
+        : r.state.includes('旧元语言') ? paint(C.yellow, '!')
+        : r.state === '缺失' ? paint(C.yellow, '✗') : paint(C.gray, '·');
+      console.log(`  ${mark} ${r.name.padEnd(12)} ${r.state}${r.bytes ? '  ' + r.bytes + ' B' : ''}`);
+    }
+    console.log('');
+    if (a.rows.some((r) => r.state.includes('旧元语言') || r.state === '缺失')) {
+      console.log(paint(C.yellow, '  有文件需要升级：workbb identity upgrade'));
+    }
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'upgrade') {
+    const r = upgradeIdentityFiles({ presetRoot, dryRun: has('--dry-run') });
+    console.log(`  目标目录 : ${r.target}`);
+    console.log('');
+    if (r.upgraded.length) {
+      console.log(paint(C.green, `✓ 已升级 ${r.upgraded.length} 个`));
+      for (const n of r.upgraded) console.log('    ' + n);
+    }
+    if (r.kept.length) {
+      console.log(paint(C.gray, `  保留 ${r.kept.length} 个`));
+      for (const n of r.kept) console.log(paint(C.gray, '    ' + n));
+    }
+    for (const n of r.skipped) console.log(paint(C.gray, '    ' + n));
+    console.log('');
+    console.log(paint(C.gray, '  只替换确认是「旧元语言版」或空文件；操作者自己写的一律保留。'));
+    console.log(paint(C.gray, '  原文件备份为 .workbb-backup'));
+    console.log('');
+    return 0;
+  }
+
 
   if (action === 'install') {
     const force = has('--force');
