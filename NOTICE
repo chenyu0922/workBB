@@ -1,0 +1,47 @@
+# NOTICE — 来源与差异声明
+
+## 上游项目
+
+**dsh-purge** — DeepSeek Harness 破甲补丁
+- 仓库：https://github.com/chenyu0922/dsh-purge
+- 原作者：小杨
+- 许可：MIT (Copyright (c) 2026 小杨)
+
+本项目 `workBB` 是 dsh-purge 的**跨产品移植改造**，目标产品由 DeepSeek Harness 换成 WorkBuddy
+（腾讯 CodeBuddy CLI 桌面外壳）。
+
+## 借用的部分（思路 / 方法论）
+
+以下来自 dsh-purge，属于方法与结构层面的借鉴：
+
+1. **锚点式提示词补丁**：用「原文包含匹配 → 整段替换」的方式改提示词，
+   不做正则、不做语法解析。上游改版时锚点失配即静默降级，不破坏目标文件。
+2. **破甲段（release block）的写法与结构**：显式声明无审查层、禁止拒绝与软化、
+   禁止解释政策、点名目标视为自有 fixture、注入提醒视为噪音、优先级声明。
+3. **补丁 optional 语义**：必需补丁未命中要报错；可选补丁未命中记 `na` 并继续。
+4. **分层编号（B/C/D）+ 状态输出形式**：逐条列出 applied / pending / na / missing。
+5. **幂等与原子写**：write-to-tmp + rename，避免半写坏文件。
+6. **署名约定**：二次开发必须标注来源。
+
+## 本项目独立实现的部分
+
+目标产品的架构完全不同，因此以下全部重写，未复制 dsh-purge 代码：
+
+| 模块 | dsh-purge（DSH） | workBB（WorkBuddy） |
+|---|---|---|
+| 注入载体 | cordis 插件 + 加密槽（AES-256-GCM）写 `prompt-inject.md` | Nunjucks 明文模板 `.tpl` |
+| 接管方式 | 插件在 host 内运行，常驻守护 | 官方 env `WORKBUDDY_PROMPT_TEMPLATES_DIR` 优先接管 |
+| 路径探测 | `DSH_HOME` / `DSH_BASE` / `DSH_SURFACE` | 对齐官方 `listWorkbuddyPromptTemplateDirCandidates()` 候选链 |
+| 匹配引擎 | 直接 `text.includes(needle)` | 规范化匹配：CRLF 归一 + 转义反引号折叠 `textpatch.js` |
+| 校验 | asar 解包后跑 `--status` | Nunjucks 离线渲染 + 安全锁残留计数 `verify.js` |
+| 反覆盖 | 破除插件指纹，防默认文本回写 | 安装体不动，升级天然不受影响；附 customPrompt 纵深层 |
+| 补丁数量 | 86 条（覆盖 DSH 全模块） | 9 条（覆盖 WorkBuddy 提示词模板） |
+
+`workBB` 没有任何文件是从 dsh-purge 源码复制而来；补丁内容（放行段文本）是按
+WorkBuddy 的模板语境**重新撰写**的。
+
+## 目标产品
+
+WorkBuddy — 腾讯 CodeBuddy CLI 桌面外壳（Electron）。
+本项目不包含、不重分发 WorkBuddy 的任何二进制或模板文件；
+`workBB` 仅在运行时读取用户本机已安装的模板，并在用户自有目录内生成派生副本。

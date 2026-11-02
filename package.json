@@ -1,0 +1,67 @@
+{
+  "name": "workbb",
+  "version": "1.0.0",
+  "description": "workBB — WorkBuddy 破甲 / 无道德限制补丁：接管 Nunjucks 提示词模板，剥离内容审查与拒答硬化，可选身份层与自定义指令层。Jailbreak + de-guard patch for WorkBuddy (CodeBuddy CLI). Zero-touch via WORKBUDDY_PROMPT_TEMPLATES_DIR.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./patches": "./lib/patches.js",
+    "./paths": "./lib/paths.js",
+    "./inject": "./lib/inject.js",
+    "./verify": "./lib/verify.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "workbb": "bin/workbb.js"
+  },
+  "files": [
+    "lib",
+    "bin",
+    "presets",
+    "docs",
+    "scripts",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "verify": "node bin/workbb.js verify",
+    "status": "node bin/workbb.js status",
+    "doctor": "node bin/workbb.js doctor"
+  },
+  "keywords": [
+    "workbuddy",
+    "codebuddy",
+    "jailbreak",
+    "de-guard",
+    "prompt",
+    "nunjucks",
+    "template-patch",
+    "llm-security",
+    "harness-security",
+    "破甲",
+    "无道德限制"
+  ],
+  "license": "MIT",
+  "author": "YG",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenyu0922/workBB.git"
+  },
+  "homepage": "https://github.com/chenyu0922/workBB#readme",
+  "bugs": {
+    "url": "https://github.com/chenyu0922/workBB/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "nunjucks": "^3.2.4"
+  },
+  "workbuddyTarget": ">=5.9.0",
+  "directories": {
+    "lib": "lib"
+  }
+}

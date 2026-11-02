@@ -1,0 +1,10 @@
+node_modules/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# 本地验证产物
+workbb-notes/
+*.tmp
+*.workbb-bak
