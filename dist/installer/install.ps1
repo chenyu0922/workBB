@@ -458,6 +458,41 @@ if (Test-Path $tplDirFinal) {
 }
 
 # ════════════════════════════════════════════════════════
+#  6.6 ★★ 强制结束正在运行的 WorkBuddy（否则它还在读旧模板）
+# ════════════════════════════════════════════════════════
+Step "6.6" "结束正在运行的 WorkBuddy（关键）"
+
+$wbProcs = @(Get-Process WorkBuddy,workbuddy-api -ErrorAction SilentlyContinue)
+if ($wbProcs.Count -gt 0) {
+    Warn "发现 $($wbProcs.Count) 个 WorkBuddy 进程还在运行"
+    Info "它们是在装之前启动的，内存里没有新环境变量，会继续读原版模板。"
+    Info "正在结束它们…"
+    foreach ($p in $wbProcs) {
+        # 进程可能已被前一个 kill 连带结束（WorkBuddy 有父子进程），属正常竞态
+        if (-not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { continue }
+        try {
+            Stop-Process -Id $p.Id -Force -ErrorAction Stop
+            Info "  已结束 pid=$($p.Id) $($p.ProcessName)"
+        } catch {
+            if ($_.Exception.Message -match 'Cannot find a process') { continue }
+            Warn "  结束 pid=$($p.Id) 失败: $($_.Exception.Message)"
+        }
+    }
+    Start-Sleep -Milliseconds 1500
+    $left = @(Get-Process WorkBuddy,workbuddy-api -ErrorAction SilentlyContinue)
+    if ($left.Count -eq 0) {
+        Ok "全部已结束"
+        Info "WorkBuddy 已关闭，下次启动就会读到定制模板"
+    } else {
+        Warn "还有 $($left.Count) 个进程没退（可能被守护进程拉起）"
+        Info "请手工在托盘右键退出，或重启电脑"
+    }
+} else {
+    Ok "当前没有 WorkBuddy 进程在运行，无需处理"
+    Info "下次启动就会读到定制模板"
+}
+
+# ════════════════════════════════════════════════════════
 #  7. 最终状态
 # ════════════════════════════════════════════════════════
 Step 7 "最终状态"
@@ -485,26 +520,25 @@ Say "============================================================" -ForegroundCo
 Say "  安装完成" -ForegroundColor Green
 Say "============================================================" -ForegroundColor Green
 Say ""
-Say "  最后一步（必须做，只有一次）：" -ForegroundColor Yellow
+Say "  安装脚本已经帮你把 WorkBuddy 关掉了。" -ForegroundColor Green
 Say ""
-Say "  环境变量已经设好，但【当前正在运行的 WorkBuddy 还读着旧模板】。"
-Say "  必须完全退出再启动，它才会用新模板。"
+Say "  现在只剩一件事：重新打开 WorkBuddy。" -ForegroundColor Yellow
 Say ""
-Say "  1) 完全退出 WorkBuddy —— 托盘图标也要右键退出，只关窗口不算"
-Say "     Get-Process WorkBuddy,workbuddy-api -EA SilentlyContinue | Stop-Process -Force"
+Say "    用哪个图标都行（原图标 / 开始菜单 / 桌面快捷方式）"
+Say "    因为环境变量是用户级的，对所有新进程生效。"
 Say ""
-Say "  2) 之后用哪个图标启动都行（原图标、开始菜单、桌面快捷方式都可以）"
-Say "     因为环境变量是用户级的，对所有进程生效。"
-Say ""
-Say "  3) 启动后验证："
+Say "  打开后【随便发一句话】，然后验证：" -ForegroundColor Yellow
 Say "     cd `"$WorkBB`""
 Say "     node bin\workbb.js status"
 Say "     要求看到：生效模板目录 = ...\.workbuddy\workbb\templates"
 Say ""
-Say "  如果第 3 步仍显示「env 未生效」：" -ForegroundColor Yellow
-Say "     说明 WorkBuddy 没继承到环境变量。两个办法："
+Say "  用打包里的 判定.cmd 更准（它直接读进程环境变量）：" -ForegroundColor Yellow
+Say "     $Here\判定.cmd"
+Say "     （建议右键以管理员身份运行）"
+Say ""
+Say "  如果判定显示「没生效」：" -ForegroundColor Yellow
 Say "     a) 重启这台电脑（最彻底）"
-Say "     b) 改用启动器： $launcher"
+Say "     b) 用启动器启动： $launcher"
 Say ""
 Say "  卸载： .\install.ps1 -Uninstall" -ForegroundColor DarkGray
 Say ""
