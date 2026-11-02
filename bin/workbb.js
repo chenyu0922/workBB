@@ -20,6 +20,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { ALL_PATCHES, CONTENT_POLICY_REPLACEMENT } from '../lib/patches.js';
+import { report as whichReport } from '../lib/which-template.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -573,6 +574,64 @@ function SETTING_LABEL(s) {
   return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
 }
 
+// ── which（证明读了哪份模板）──────────────────────────────
+
+function cmdWhich() {
+  printBanner();
+
+  const args = process.argv.slice(3);
+  const wantCwd = args.find((a) => !a.startsWith('-')) || arg('--cwd') || process.cwd();
+  const envValue = arg('--env') ?? (process.env.WORKBUDDY_PROMPT_TEMPLATES_DIR || '');
+
+  const r = whichReport(envValue, wantCwd);
+
+  console.log(paint(C.bold, '  受检环境'));
+  console.log(`    env  : ${r.envValue}`);
+  console.log(`    cwd  : ${r.cwd}`);
+  console.log('');
+
+  console.log(paint(C.bold, '  官方候选链（逐字复刻 authority-snapshot.js）'));
+  for (const c of r.candidates) {
+    const mark = c.exists ? paint(C.green, '✓') : paint(C.gray, '·');
+    const note = c.isAsarFile ? paint(C.yellow, '  ← asar 文件（不会出现在链里）') : '';
+    console.log(`    ${mark} [${c.idx}] ${c.dir}${note}`);
+  }
+  console.log('');
+
+  if (!r.picked) {
+    console.log(paint(C.red, '  ✗ 四个候选位置都没有 workbuddy-prompt.tpl'));
+    console.log(paint(C.gray, '    → WorkBuddy 启动时会因为找不到模板而报错，或走内置回退'));
+    console.log('');
+    return 1;
+  }
+
+  console.log(paint(C.bold, '  ★ 实际选中'));
+  console.log(`    ${r.picked.dir}`);
+  console.log('');
+
+  const f = r.fingerprint;
+  console.log(paint(C.bold, '  该文件指纹'));
+  console.log(`    字节      : ${f.bytes}`);
+  console.log(`    sha256    : ${f.sha256}`);
+  console.log(`    content_policy 长度 : ${f.cpLen}`);
+  console.log(`    原锚点 You MUST refuse : ${f.hasOriginalAnchor ? paint(C.red, '有 ×' + f.anchorCount + ' ← 这是原版！') : paint(C.green, '无（已替换）')}`);
+  console.log(`    中文审核层标记 : ${f.hasReviewLayerCn ? paint(C.green, '有') : paint(C.gray, '无')}`);
+  console.log(`    作废声明       : ${f.hasVoidStatement ? paint(C.green, '有') : paint(C.gray, '无')}`);
+  console.log('');
+
+  const ok = !f.hasOriginalAnchor;
+  if (ok) {
+    console.log(paint(C.green, '  ✓ 选中位置 = 定制模板（不含原锚点）'));
+  } else {
+    console.log(paint(C.red, '  ✗ 选中位置 = 原版模板（含 You MUST refuse）'));
+    console.log(paint(C.yellow, '    → 说明 env 没进 WorkBuddy 进程，或该目录被指向了安装体'));
+  }
+  console.log('');
+  console.log(paint(C.gray, '  把这个输出原样发我，两台机器各一份，对比 sha256 即可确定差异。'));
+  console.log('');
+  return ok ? 0 : 1;
+}
+
 // ── identity（身份文件层）────────────────────────────────
 
 function cmdIdentity() {
@@ -901,6 +960,7 @@ const table = {
   launcher: cmdLauncher,
   render: cmdRender,
   guard: cmdGuard,
+  which: cmdWhich,
   identity: cmdIdentity,
   sealed: cmdSealed,
   'custom-prompt': cmdCustomPrompt,

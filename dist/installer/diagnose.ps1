@@ -173,6 +173,29 @@ if ($idLens.Count -gt 0) {
     L "  日志里没有 user-context 渲染记录（启动后没发过消息？）"
 }
 
+# ── 5d. ★ 官方解析复刻：到底命中哪个目录（新增）────────
+L ""
+L "[5d] 官方候选链复刻 ★ 决定性证据"
+$wbbin = $null
+$probePaths = @(
+    (Join-Path $PSScriptRoot 'workbb\bin\workbb.js'),
+    (Join-Path (Split-Path -Parent $PSScriptRoot) 'workbb\bin\workbb.js'),
+    (Join-Path $cfg 'workbb\bin\workbb.js'),
+    (Join-Path $env:USERPROFILE '.workbuddy\workbb\bin\workbb.js')
+)
+foreach ($c in $probePaths) {
+    if ($c -and (Test-Path $c)) { $wbbin = $c; break }
+}
+if ($wbbin -and $nodeExe) {
+    $cwd = if ($InstallRoot) { $InstallRoot } else { 'D:\WorkBuddy' }
+    $out5d = & $nodeExe $wbbin 'which' '--cwd' $cwd 2>&1 | Out-String
+    foreach ($line in ($out5d -split "`n")) {
+        if ($line.Trim() -and $line -notmatch '┌|└|│') { L "  $($line.TrimEnd())" }
+    }
+} else {
+    L "  跳过（找不到 workbb\bin\workbb.js）"
+}
+
 # ── 6. settings.json ────────────────────────────────────
 L ""
 L "[6] settings.json"
@@ -209,9 +232,11 @@ L ""
 L "[9] 定制模板渲染测试"
 if ((Test-Path $tplDir) -and $nodeExe) {
     $wbbin = $null
-    foreach ($c in @((Join-Path $PSScriptRoot 'workbb\bin\workbb.js'), (Join-Path $cfg 'workbb\bin\workbb.js'))) {
-        if (Test-Path $c) { $wbbin = $c; break }
-    }
+    foreach ($c in @(
+        (Join-Path $PSScriptRoot 'workbb\bin\workbb.js'),
+        (Join-Path (Split-Path -Parent $PSScriptRoot) 'workbb\bin\workbb.js'),
+        (Join-Path $cfg 'workbb\bin\workbb.js')
+    )) { if ($c -and (Test-Path $c)) { $wbbin = $c; break } }
     if ($wbbin) {
         $tmpJs = Join-Path $env:TEMP ('r-' + [guid]::NewGuid().ToString('N') + '.mjs')
         @'
