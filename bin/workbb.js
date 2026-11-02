@@ -40,6 +40,18 @@ import {
   settingsPath,
 } from '../lib/inject.js';
 import { overrideRoot, resolveTemplatesDir, TEMPLATES_DIR_ENV, stateDir } from '../lib/paths.js';
+import {
+  installGuard,
+  removeGuard,
+  guardStatus,
+  selfHeal,
+  disableAutoUpdateSetting,
+  restoreAutoUpdateSetting,
+  blockCacheDir,
+  unblockCacheDir,
+  purgePendingInstallers,
+  updateCacheCandidates,
+} from '../lib/upgrade-guard.js';
 
 const C = {
   reset: '\u001b[0m',
@@ -385,6 +397,105 @@ function cmdRender() {
   return 0;
 }
 
+// ── guard（升级屏蔽）────────────────────────────────────
+
+function cmdGuard() {
+  return cmdGuardAsync();
+}
+
+async function cmdGuardAsync() {
+  const action = process.argv[3] || 'status';
+  printBanner();
+
+  if (action === 'install') {
+    const r = installGuard({ blockCache: !has('--no-cache-block') });
+    if (r.setting) {
+      console.log(paint(C.green, '✓ 官方开关已关闭'));
+      console.log(`    ${SETTING_LABEL(r.setting)}`);
+    }
+    for (const c of r.caches) {
+      const mark = c.action.startsWith('already') ? paint(C.gray, '·') : paint(C.green, '✓');
+      console.log(`${mark} 缓存拦阻 ${c.action.padEnd(18)} ${c.target}`);
+      if (c.backup) console.log(paint(C.gray, `    原目录已保留为 ${c.backup}`));
+    }
+    if (r.purged.length) {
+      console.log(paint(C.green, `✓ 已清理 ${r.purged.length} 个待安装升级包`));
+      for (const p of r.purged.slice(0, 5)) console.log(paint(C.gray, '    ' + p));
+    }
+    for (const e of r.errors) console.log(paint(C.red, '✗ ' + e));
+    console.log('');
+    console.log(paint(C.gray, '  需要完全退出 WorkBuddy（含托盘）再启动才能让开关生效。'));
+    console.log('');
+    return r.errors.length ? 1 : 0;
+  }
+
+  if (action === 'remove') {
+    const r = removeGuard();
+    if (r.setting) console.log(paint(C.green, '✓ 官方开关已恢复') + paint(C.gray, ` (changed=${r.setting.changed})`));
+    for (const c of r.caches) console.log(paint(C.green, `✓ 解除拦阻 ${c.action.padEnd(12)} ${c.target}`));
+    for (const e of r.errors) console.log(paint(C.red, '✗ ' + e));
+    console.log('');
+    return r.errors.length ? 1 : 0;
+  }
+
+  if (action === 'purge') {
+    const p = purgePendingInstallers();
+    console.log(p.length ? paint(C.green, `✓ 已清理 ${p.length} 个升级包`) : paint(C.yellow, '· 没有需要清理的升级包'));
+    for (const f of p) console.log('  ' + f);
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'heal') {
+    const r = await selfHeal();
+    if (r.action === 'skip') {
+      console.log(paint(C.yellow, `· 跳过：${r.reason}`));
+    } else {
+      const drift = r.drift || [];
+      if (drift.length) {
+        console.log(paint(C.yellow, `! 检测到 ${drift.length} 个源模板变化（疑似官方升级）：`));
+        for (const d of drift) console.log('    ' + d.file + ' — ' + d.reason);
+      } else {
+        console.log(paint(C.gray, '  源模板无变化'));
+      }
+      const applied = Object.values(r.report?.patches || {}).reduce((a, b) => a + b, 0);
+      console.log(paint(C.green, `✓ 已重打补丁：${applied} 处命中`));
+      console.log(`  目标目录 ${r.report?.targetDir}`);
+    }
+    console.log('');
+    return r.action === 'skip' ? 0 : 0;
+  }
+
+  // 默认 status
+  const st = guardStatus();
+  if (has('--json')) {
+    console.log(JSON.stringify(st, null, 2));
+    return 0;
+  }
+  console.log(`  官方开关 ${st.setting.key}: ${st.setting.disabled ? paint(C.green, '已关闭（屏蔽生效）') : paint(C.yellow, '未关闭')}`);
+  console.log(paint(C.gray, `    ${st.setting.file}`));
+  console.log('');
+  console.log('  更新缓存目录：');
+  for (const c of st.caches) {
+    const mark = c.blocked
+      ? paint(C.green, `✓ 已拦阻(${c.form})`)
+      : c.exists
+        ? paint(C.yellow, '· 存在未拦阻')
+        : paint(C.gray, '· 不存在');
+    console.log(`    ${mark}  ${c.dir}`);
+  }
+  console.log('');
+  const sh = st.selfHeal;
+  console.log(`  升级自愈 (mirror): ${sh.mode === 'mirror' ? (sh.mirrorPresent ? paint(C.green, '就绪') : paint(C.red, '镜像缺失')) : paint(C.gray, '未启用')}`);
+  if (sh.mirrorDir) console.log(paint(C.gray, `    ${sh.mirrorDir}`));
+  console.log('');
+  return 0;
+}
+
+function SETTING_LABEL(s) {
+  return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
+}
+
 // ── help ────────────────────────────────────────────────
 
 function cmdHelp() {
@@ -397,9 +508,17 @@ function cmdHelp() {
   console.log('  workbb launcher [--exe <WorkBuddy.exe>]');
   console.log('      生成带 env 的启动脚本（双击即用）');
   console.log('');
-  console.log('  workbb custom-prompt install [--file <路径>] [--append]');
+  console.log('  workbb custom-prompt install [--preset zh|en] [--file <路径>] [--append]');
   console.log('  workbb custom-prompt remove');
   console.log('      纵深层：写入 settings.json 的 personalization.customPrompt');
+  console.log('');
+  console.log('  workbb guard install|remove|status|purge|heal');
+  console.log('      屏蔽 WorkBuddy 自动升级（官方开关 + 缓存拦阻 + 自愈）');
+  console.log('      install  关闭 startupForceAutoUpdate，并拦阻更新缓存目录');
+  console.log('      remove   恢复官方默认');
+  console.log('      status   查看屏蔽与自愈状态');
+  console.log('      purge    清理已下载的升级包');
+  console.log('      heal     官方升级后自动重打补丁');
   console.log('');
   console.log('  workbb verify [--dir <路径>]');
   console.log('      Nunjucks 离线渲染校验：无语法错误 + 无安全锁残留');
@@ -423,6 +542,7 @@ const table = {
   doctor: cmdDoctor,
   launcher: cmdLauncher,
   render: cmdRender,
+  guard: cmdGuard,
   'custom-prompt': cmdCustomPrompt,
   help: cmdHelp,
   '-h': cmdHelp,
@@ -434,5 +554,11 @@ if (!cmd || !table[cmd]) {
   process.exit(cmd ? 1 : 0);
 }
 
-const code = table[cmd]();
-process.exit(code ?? 0);
+Promise.resolve(table[cmd]()).then(
+  (code) => process.exit(typeof code === 'number' ? code : 0),
+  (err) => {
+    console.error('\n✗ 执行失败：' + (err?.message || String(err)));
+    if (process.env.WORKBB_DEBUG) console.error(err);
+    process.exit(1);
+  },
+);

@@ -154,9 +154,12 @@ workbb apply [--inplace] [--templates-dir <路径>]
 workbb launcher [--exe <WorkBuddy.exe>]
     生成带 env 的启动脚本
 
-workbb custom-prompt install [--file <路径>] [--append]
+workbb custom-prompt install [--preset zh|en] [--file <路径>] [--append]
 workbb custom-prompt remove
     纵深层：写入 / 移除 settings.json 的 personalization.customPrompt
+
+workbb guard install|remove|status|purge|heal
+    屏蔽自动升级（官方开关 + 缓存拦阻 + 自愈）
 
 workbb verify [--dir <路径>]
     Nunjucks 离线渲染校验
@@ -166,6 +169,8 @@ workbb doctor
 workbb revert
 workbb render <模板文件名> [--dir <路径>] [--out <文件>]
 ```
+
+独立单 exe（`dist/bin/workbb-guard.exe`）另有 `watch [秒]` 与 `autostart on|off`。
 
 ### 退出码
 
@@ -179,10 +184,61 @@ workbb render <模板文件名> [--dir <路径>] [--out <文件>]
 | | **mirror（默认）** | **inplace** |
 |---|---|---|
 | 改动位置 | `~/.workbuddy/workbb/templates/` | 安装体 `resources/templates/` |
-| 官方升级影响 | 无 | 被覆盖，需重新 apply |
+| **官方升级后** | ✅ **不失效**（升级不动这个目录） | ❌ 被覆盖，需重新 apply |
 | 需要环境变量/启动器 | 是 | 否 |
 | 可回滚 | 删目录即可 | 从 `~/.workbuddy/workbb/backup/` 还原 |
 | 推荐 | ✅ | 仅在你确定不做升级时 |
+
+> **升级会不会让 workBB 失效？** 默认 mirror 模式下**不会** —— 定制模板在用户配置目录，
+> NSIS 覆盖安装只动安装体。真正会失效的是 `--inplace` 模式。
+> 完整源码级查证见 [`docs/upgrade-shield.md`](docs/upgrade-shield.md)。
+
+---
+
+## 屏蔽自动升级
+
+WorkBuddy 启动时会检查 `https://www.workbuddy.cn/v2/update?platform=...&version=...`，
+命中就静默下载 `installer.exe`（实测存在过 450 MB 的包）→ 弹过渡窗 → `app.quit()` → NSIS 覆盖安装 → 重启。
+
+这才是真正干扰你的东西。workBB 提供三层非连坐屏蔽：
+
+| 层 | 做法 | 挡什么 |
+|---|---|---|
+| **L1 官方开关** | `settings.json` → `startupForceAutoUpdate: false` | `runStartupForceAutoUpdate` 整条链 |
+| **L2 缓存拦阻** | `%TEMP%\workbuddy-update-<arch>-<name>` 做成占位，使 `cacheRootTrusted=false` | 下载 / 校验 / 安装（`installVerifiedUpdate()` 直接 return false） |
+| **L3 升级自愈** | 比对源模板 sha256，漂移则重打补丁 | 补丁丢失 / 锚点失配 |
+
+**不做整域 hosts 阻断**：`www.workbuddy.cn` 同时是登录与 API 域，挡了整个域会连坐登录。
+
+### 用内置命令
+
+```bash
+node bin/workbb.js guard install    # 装屏蔽
+node bin/workbb.js guard status
+node bin/workbb.js guard purge      # 清掉已下载的升级包
+node bin/workbb.js guard heal       # 官方升级后重打补丁（会报告哪些模板漂移）
+node bin/workbb.js guard remove     # 完整还原
+```
+
+### 用独立单 exe（推荐，17 KB，不需要 Node）
+
+```bash
+build-guard.cmd                     # 需 .NET SDK，一次性构建
+
+dist/bin/workbb-guard.exe install      # 装屏蔽
+dist/bin/workbb-guard.exe status
+dist/bin/workbb-guard.exe watch 60      # 守护模式：保活屏蔽 + 自动清包
+dist/bin/workbb-guard.exe autostart on # 开机自启（守护模式）
+dist/bin/workbb-guard.exe uninstall    # 完整还原
+```
+
+它是 C# 原生 exe，只依赖 Windows 自带的 .NET Framework（Win10+ 默认有），可单独拷走分发。
+体积对比：**C# 版 17 KB**，Node SEA 版 89 MB（node.exe 拖累），所以主推 C#。
+
+两版共享同一套状态，可混用（符号链接形态与占位文件形态各自识别对方）。
+
+> ⚠️ 服务端 `forceUpdate:true` 那条链（启动 10 秒后的 `runEarlyForceUpgradeCheck`）
+> 不受配置开关控制。要彻底挡需要代理层按路径拦 `/v2/update`（不连坐登录）。
 
 ---
 

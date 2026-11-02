@@ -8,3 +8,7 @@ Thumbs.db
 workbb-notes/
 *.tmp
 *.workbb-bak
+
+# C# 构建中间产物
+src-cs/obj/
+src-cs/bin/

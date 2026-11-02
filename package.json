@@ -29,7 +29,8 @@
   "scripts": {
     "verify": "node bin/workbb.js verify",
     "status": "node bin/workbb.js status",
-    "doctor": "node bin/workbb.js doctor"
+    "doctor": "node bin/workbb.js doctor",
+    "build:guard": "dotnet build src-cs/guard.csproj -c Release -o dist/bin"
   },
   "keywords": [
     "workbuddy",

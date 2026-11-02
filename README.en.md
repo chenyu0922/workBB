@@ -154,9 +154,12 @@ workbb apply [--inplace] [--templates-dir <path>]
 workbb launcher [--exe <WorkBuddy.exe>]
     generate a launcher script carrying the env var
 
-workbb custom-prompt install [--file <path>] [--append]
+workbb custom-prompt install [--preset zh|en] [--file <path>] [--append]
 workbb custom-prompt remove
     defence-in-depth: write / remove personalization.customPrompt
+
+workbb guard install|remove|status|purge|heal
+    block auto-update (official switch + cache blockade + self-heal)
 
 workbb verify [--dir <path>]
     offline Nunjucks render verification
@@ -166,6 +169,9 @@ workbb doctor
 workbb revert
 workbb render <template-file> [--dir <path>] [--out <file>]
 ```
+
+The standalone exe (`dist/bin/workbb-guard.exe`) additionally offers `watch [seconds]` and
+`autostart on|off`.
 
 ### Exit codes
 
@@ -179,10 +185,67 @@ workbb render <template-file> [--dir <path>] [--out <file>]
 | | **mirror (default)** | **inplace** |
 |---|---|---|
 | Changed location | `~/.workbuddy/workbb/templates/` | installation `resources/templates/` |
-| Official update impact | none | overwritten; re-apply required |
+| **After an official update** | ✅ **stays valid** (the updater never touches that directory) | ❌ overwritten; re-apply required |
 | Needs env var / launcher | yes | no |
 | Rollback | delete the directory | restore from `~/.workbuddy/workbb/backup/` |
 | Recommended | ✅ | only if you never update |
+
+> **Will an update break workBB?** In the default mirror mode, **no** — customised templates live in
+> the user config directory, while the NSIS updater only rewrites the installation.
+> `--inplace` is the mode that breaks. Full source-level analysis in
+> [`docs/upgrade-shield.md`](docs/upgrade-shield.md).
+
+---
+
+## Blocking auto-update
+
+On startup WorkBuddy checks `https://www.workbuddy.cn/v2/update?platform=...&version=...`. On a hit it
+silently downloads `installer.exe` (a 450 MB package was observed on this machine), shows a transition
+window, calls `app.quit()`, lets NSIS overwrite the install, then relaunches.
+
+That is the actual nuisance. workBB ships a three-layer, non-collateral shield:
+
+| Layer | Mechanism | Blocks |
+|---|---|---|
+| **L1 official switch** | `settings.json` → `startupForceAutoUpdate: false` | the whole `runStartupForceAutoUpdate` chain |
+| **L2 cache blockade** | `%TEMP%\workbuddy-update-<arch>-<name>` replaced with a placeholder so `cacheRootTrusted=false` | download / verify / install (`installVerifiedUpdate()` returns false immediately) |
+| **L3 self-heal** | compare source-template sha256, re-patch on drift | lost patches / anchor drift after an update |
+
+**No whole-domain hosts block**: `www.workbuddy.cn` is also the login and API domain — blocking it
+would take login down with it.
+
+### Built-in commands
+
+```bash
+node bin/workbb.js guard install    # install the shield
+node bin/workbb.js guard status
+node bin/workbb.js guard purge      # delete already-downloaded update packages
+node bin/workbb.js guard heal       # re-patch after an official update (reports drifted files)
+node bin/workbb.js guard remove     # full restore
+```
+
+### Standalone single exe (recommended, 17 KB, no Node needed)
+
+```bash
+build-guard.cmd                     # one-time build, needs .NET SDK
+
+dist/bin/workbb-guard.exe install      # install the shield
+dist/bin/workbb-guard.exe status
+dist/bin/workbb-guard.exe watch 60      # keep-alive + auto-purge loop
+dist/bin/workbb-guard.exe autostart on # run the watchdog at logon
+dist/bin/workbb-guard.exe uninstall    # full restore
+```
+
+A native C# exe depending only on the Windows-bundled .NET Framework (present on Win10+), so it can be
+copied and distributed alone. Size: **C# build 17 KB** vs Node SEA build 89 MB (dragged up by
+`node.exe`) — hence the C# one is the primary artifact.
+
+Both implementations share the same state and interoperate (symlink form and placeholder-file form
+each recognise the other).
+
+> ⚠️ The server-side `forceUpdate:true` path (the `runEarlyForceUpgradeCheck` that fires 10 s after
+> launch) is **not** governed by the config switch. Blocking that completely needs a proxy layer
+> intercepting `/v2/update` by path, so login stays intact.
 
 ---
 
