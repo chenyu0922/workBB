@@ -28,6 +28,7 @@ import {
   status,
   doctor,
   readState,
+  writeState,
 } from '../lib/index.js';
 import { verifyTemplates, createEnv, baselineVars, PROMPT_TEMPLATE_FILES } from '../lib/verify.js';
 import {
@@ -69,6 +70,11 @@ import {
   restoreAsar,
   listEntries,
 } from '../lib/asar-inject.js';
+import {
+  unpackToEnvDir,
+  verifyExtractedDir,
+  extractTemplatesFromAsar,
+} from '../lib/asar-extract.js';
 
 const C = {
   reset: '\u001b[0m',
@@ -564,7 +570,7 @@ function SETTING_LABEL(s) {
 
 // ── sealed（密封态：直接改 app.asar）────────────────────
 
-function cmdSealed() {
+async function cmdSealed() {
   const action = process.argv[3] || 'status';
   printBanner();
 
@@ -677,7 +683,97 @@ function cmdSealed() {
     return ok === v.length ? 0 : 1;
   }
 
-  console.log('用法: workbb sealed status|apply|revert|verify [--root <安装根>] [--asar <app.asar>]');
+  if (action === 'unpack') {
+    // 密封态 → 解出模板 → 转成 env 接管（不改安装体，升级不影响）
+    const outDir = arg('--out') || overrideRoot();
+    console.log(`  安装根   : ${installRoot}`);
+    console.log(`  app.asar : ${asarPath}`);
+    console.log(`  输出目录 : ${outDir}`);
+    console.log('');
+
+    const r = unpackToEnvDir({ asarPath, outDir });
+
+    console.log(paint(C.green, `✓ 解出 ${r.extracted.length} 个模板`));
+    if (r.notes?.length) for (const n of r.notes) console.log(paint(C.gray, '    ' + n));
+    if (r.missing?.length) console.log(paint(C.yellow, `! 缺失 ${r.missing.length} 个: ${r.missing.join(', ')}`));
+
+    console.log('');
+    console.log('  完整性校验：');
+    for (const c of r.verify.checks) {
+      console.log(`    ${c.ok ? paint(C.green, '✓') : paint(C.red, '✗')} ${c.name.padEnd(22)} ${paint(C.gray, String(c.detail))}`);
+    }
+    console.log('');
+
+    if (!r.verify.ok) {
+      console.error(paint(C.red, '✗ 解出的目录不完整，不能用于 env 接管'));
+      return 1;
+    }
+
+    // 可选：直接对解出的目录打补丁（不经过 apply 的「复制一份」流程）
+    if (has('--patch')) {
+      console.log('');
+      console.log('  对解出的目录就地打补丁…');
+      const { applyPatchesToText } = await import('../lib/index.js');
+      const { detectEol } = await import('../lib/textpatch.js');
+      let patched = 0;
+      const hits = {};
+      for (const f of fs.readdirSync(outDir).filter((x) => x.endsWith('.tpl'))) {
+        const fp = path.join(outDir, f);
+        const raw = fs.readFileSync(fp, 'utf8');
+        const eol = detectEol(raw);
+        const r2 = applyPatchesToText(raw);
+        if (r2.applied.length) {
+          fs.writeFileSync(fp, r2.text.replace(/\n/g, eol));
+          patched++;
+          for (const id of r2.applied) hits[id] = (hits[id] || 0) + 1;
+        }
+      }
+      console.log(paint(C.green, `✓ ${patched} 个模板已打补丁`));
+      for (const [k, v] of Object.entries(hits)) console.log(paint(C.gray, `    ${k}: ${v} 处`));
+      console.log('');
+    }
+
+    // 写入 state，让 apply/status 认这个目录
+    const st = readState() || {};
+    st.mode = 'mirror';
+    st.installedAt = new Date().toISOString();
+    st.sourceDir = asarPath;
+    st.sourceKind = 'asar-sealed';
+    st.targetDir = outDir;
+    st.patchedInPlace = has('--patch');
+    writeState(st);
+
+    // 指纹（用于 guard heal 的漂移检测）
+    {
+      const { createHash } = await import('node:crypto');
+      const st2 = readState();
+      if (st2) {
+        st2.sourceFingerprint = fs.readdirSync(outDir)
+          .filter((f) => f.endsWith('.tpl'))
+          .map((f) => ({
+            file: f,
+            sha256: createHash('sha256').update(fs.readFileSync(path.join(outDir, f))).digest('hex'),
+          }));
+        writeState(st2);
+      }
+    }
+
+    console.log(paint(C.green, '✓ 已转为 env 接管目录（未改动安装体）'));
+    console.log('');
+    console.log(paint(C.bold, '  接下来两步：'));
+    console.log(`    ${paint(C.cyan, 'A')} 让 WorkBuddy 加载它：`);
+    const exe = guessExePaths()[0];
+    console.log(`         node bin/workbb.js launcher${exe ? ` --exe "${exe}"` : ' --exe "<WorkBuddy.exe>"'}`);
+    console.log(paint(C.gray, '         或用 setx 后完全退出（含托盘）再启动'));
+    console.log(`    ${paint(C.cyan, 'B')} 给解出的模板打补丁（可选，若你要改内容）：`);
+    console.log(`         node bin/workbb.js apply --templates-dir "${outDir}"`);
+    console.log(paint(C.gray, '         注意：apply 会把源目录当官方模板再复制一份，'))
+    console.log(paint(C.gray, '         密封态场景下更推荐直接改 outDir 里的文件，再 verify'));
+    console.log('');
+    return 0;
+  }
+
+  console.log('用法: workbb sealed status|unpack|apply|revert|verify [--root <安装根>] [--out <目录>]');
   return 1;
 }
 
@@ -705,8 +801,13 @@ function cmdHelp() {
   console.log('      purge    清理已下载的升级包');
   console.log('      heal     官方升级后自动重打补丁');
   console.log('');
-  console.log('  workbb sealed status|apply|verify|revert [--root <安装根>]');
-  console.log('      密封态（模板打包在 app.asar 内）时直接改 asar 注入');
+  console.log('  workbb sealed status|unpack|apply|verify|revert [--root <安装根>]');
+  console.log('      status  看形态（packed=密封态 / unpacked=实体文件）');
+  console.log('      unpack  从 asar 解出模板到用户目录，转 env 接管（推荐，不改安装体）');
+  console.log('              --patch 边解出边打补丁');
+  console.log('      apply   直接把模板写进 app.asar（改安装体，升级会覆盖）');
+  console.log('      verify  校验 asar 内注入结果');
+  console.log('      revert  从备份还原 app.asar');
   console.log('');
   console.log('  workbb verify [--dir <路径>]');
   console.log('      Nunjucks 离线渲染校验：无语法错误 + 无策略段残留');
