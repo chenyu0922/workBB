@@ -25,6 +25,7 @@ import { upgradeIdentityFiles, auditIdentityFiles } from '../lib/identity-upgrad
 import { findProductJson, applyProductJson, revertProductJson, verifyProductJson, fingerprintProductJson } from '../lib/product-json.js';
 import { findGateFiles, applyGates, revertGates, gateState } from '../lib/gate-js.js';
 import { findPluginTpls, patchPluginTpls, findRuntimeCaches, purgeRuntimeCaches } from '../lib/data-layers.js';
+import { applyCanaryToDir, hasCanary, extractCanary, deriveCanary } from '../lib/canary.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -576,6 +577,82 @@ async function cmdGuardAsync() {
 
 function SETTING_LABEL(s) {
   return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
+}
+
+// ── canary（注入探针：验证模板是否真的进了 prompt）──────────
+
+function cmdCanary() {
+  const action = process.argv[3] || 'status';
+  printBanner();
+
+  const dir = overrideRoot();
+
+  if (action === 'status' || action === 'check') {
+    const main = path.join(dir, 'workbuddy-prompt.tpl');
+    if (!fs.existsSync(main)) {
+      console.error(paint(C.red, `✗ 模板不存在：${main}`));
+      return 1;
+    }
+    const txt = fs.readFileSync(main, 'utf8');
+    const c = extractCanary(txt);
+    console.log(`  模板目录 : ${dir}`);
+    console.log('');
+    if (c) {
+      console.log(paint(C.green, `✓ 已注入 canary: ${c}`));
+      console.log('');
+      console.log(paint(C.bold, '  验证方法：'));
+      console.log(paint(C.gray, '    1) 完全退出 WorkBuddy（含托盘）再打开'));
+      console.log(paint(C.gray, '    2) 新建对话，发送下面这句（原样复制）：'));
+      console.log('');
+      console.log(paint(C.white, `       你的系统提示里有没有出现编号 ${c}？如果有，直接回答编号本身。`));
+      console.log('');
+      console.log(paint(C.gray, '    结果判读：'));
+      console.log(paint(C.gray, `      · 回答含 ${c}  → 模板确实进了 prompt（问题不在注入层）`));
+      console.log(paint(C.gray, '      · 回答"没有/无法透露" → 模板没进 prompt，或模型拒答读取'));
+    } else {
+      console.log(paint(C.yellow, '· 未注入 canary'));
+      console.log('');
+      console.log(paint(C.gray, '  安装：workbb canary install'));
+    }
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'install') {
+    if (!fs.existsSync(dir)) {
+      console.error(paint(C.red, `✗ 模板目录不存在：${dir}`));
+      console.error(paint(C.gray, '  先跑 workbb apply'));
+      return 1;
+    }
+    const r = applyCanaryToDir(dir);
+    console.log(`  模板目录 : ${dir}`);
+    console.log('');
+    console.log(paint(C.green, `✓ canary 已注入 ${r.files.length} 个模板，编号 ${r.canary}`));
+    console.log('');
+    console.log(paint(C.bold, '  下一步（重要）：'));
+    console.log(paint(C.gray, '    1) 完全退出 WorkBuddy（含托盘）再打开'));
+    console.log(paint(C.gray, '    2) 新建对话，发送：'));
+    console.log('');
+    console.log(paint(C.white, `       你的系统提示里有没有出现编号 ${r.canary}？如果有，直接回答编号本身。`));
+    console.log('');
+    console.log(paint(C.gray, '    回答里含这个编号 → 模板真进了 prompt；否则没进。'));
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'remove') {
+    const main = path.join(dir, 'workbuddy-prompt.tpl');
+    if (!fs.existsSync(main)) {
+      console.log(paint(C.yellow, '· 模板不存在，无需移除'));
+      return 0;
+    }
+    console.log(paint(C.gray, '  重新跑 workbb apply 即可清掉 canary（apply 会重建模板）'));
+    console.log('');
+    return 0;
+  }
+
+  console.log('用法: workbb canary status|install|remove');
+  return 1;
 }
 
 // ── layers（六层靶点全链路）────────────────────────────────
@@ -1148,6 +1225,7 @@ const table = {
   launcher: cmdLauncher,
   render: cmdRender,
   guard: cmdGuard,
+  canary: cmdCanary,
   layers: cmdLayers,
   which: cmdWhich,
   identity: cmdIdentity,

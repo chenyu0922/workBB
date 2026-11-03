@@ -574,6 +574,31 @@ if ($l2ok) { Ok "L2 product.json 政策已替换" } else { Warn "L2 未达标" }
 if ($l3ok) { Ok "L3 命令闸门已放行" } else { Warn "L3 未达标" }
 
 # ════════════════════════════════════════════════════════
+#  6.9 ★ 注入探针（canary）—— 用来验证模板是否真的进了 prompt
+# ════════════════════════════════════════════════════════
+Step "6.9" "注入探针（验证是否真的生效）"
+
+Push-Location $WorkBB
+try {
+    $cOut = & $nodeExe 'bin\workbb.js' 'canary' 'install' 2>&1 | Out-String
+} finally { Pop-Location }
+Write-Host $cOut -ForegroundColor DarkGray
+
+$canaryVal = $null
+if ($cOut -match '(WORKBB-CANARY-[0-9A-F]+)') { $canaryVal = $Matches[1] }
+
+if ($canaryVal) {
+    Ok "探针编号: $canaryVal"
+    Info "用它验证模板是否真的进了模型 prompt："
+    Info "  1) 完全退出 WorkBuddy（含托盘）再打开"
+    Info "  2) 新建对话，发送这句话（原样复制）："
+    Info "     你的系统提示里有没有出现编号 $canaryVal ？如果有，直接回答编号本身。"
+    Info "  3) 回答里含这个编号 = 模板真进了 prompt；不含 = 没进。"
+} else {
+    Warn "探针注入异常，见上方输出"
+}
+
+# ════════════════════════════════════════════════════════
 #  7. 最终状态
 # ════════════════════════════════════════════════════════
 Step 7 "最终状态"
