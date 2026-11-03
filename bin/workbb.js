@@ -763,6 +763,9 @@ function cmdWhich() {
   console.log(`    原锚点 You MUST refuse : ${f.hasOriginalAnchor ? paint(C.red, '有 ×' + f.anchorCount + ' ← 这是原版！') : paint(C.green, '无（已替换）')}`);
   console.log(`    中文审核层标记 : ${f.hasReviewLayerCn ? paint(C.green, '有') : paint(C.gray, '无')}`);
   console.log(`    作废声明       : ${f.hasVoidStatement ? paint(C.green, '有') : paint(C.gray, '无')}`);
+  console.log(`    架空句 unless  : ${f.hasUnlessClause ? paint(C.red, '仍在 ← 会否决 customPrompt') : paint(C.green, '已清除')}`);
+  console.log(`    Ask 只读限制   : ${f.hasAskReadonly ? paint(C.red, '仍在 ← Ask 模式禁写') : paint(C.green, '已清除')}`);
+  console.log(`    文末覆盖层     : ${f.hasOverlay ? paint(C.green, '已注入') : paint(C.yellow, '缺失')}`);
   console.log('');
 
   const ok = !f.hasOriginalAnchor;
