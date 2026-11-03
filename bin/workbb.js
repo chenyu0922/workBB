@@ -28,6 +28,8 @@ import { findPluginTpls, patchPluginTpls, findRuntimeCaches, purgeRuntimeCaches 
 import { applyCanaryToDir, hasCanary, extractCanary, deriveCanary } from '../lib/canary.js';
 import { applyPromptLayers, inspectPromptLayers } from '../lib/prompt-layers.js';
 import { derivePersonaProbe, applyPersonaProbeToDir, detectPersonaProbe } from '../lib/persona-probe.js';
+import { findMemoryArchives, injectAllArchives, restoreArchives, getMemoryGates, enableMemoryGates, parseMemoryBlock } from '../lib/memory-channel.js';
+import { buildMemoryInject } from '../lib/memory-inject-text.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -579,6 +581,97 @@ async function cmdGuardAsync() {
 
 function SETTING_LABEL(s) {
   return `${s.key}: ${s.before === undefined ? '(unset)' : s.before} → ${s.after}  (${s.path})`;
+}
+
+// ── memory（L6 云记忆通道：每轮强制注入的位置）──────────────
+
+function cmdMemory() {
+  const action = process.argv[3] || 'status';
+  printBanner();
+
+  if (action === 'status') {
+    const gates = getMemoryGates();
+    const archs = findMemoryArchives();
+
+    console.log(paint(C.bold, '  云记忆档案（memoryBlock 每轮注入系统提示词）'));
+    if (!archs.length) {
+      console.log(paint(C.yellow, '    未找到 <ConfigDir>\\memory\\<uid>_memory.md'));
+      console.log(paint(C.gray, '    → 先在 WorkBuddy 里发一句话，让客户端生成记忆档案'));
+    } else {
+      for (const a of archs) {
+        const mark = a.blockLen > 0 ? paint(C.green, '✓') : paint(C.gray, '·');
+        console.log(`    ${mark} ${a.uid}`);
+        console.log(paint(C.gray, `        block=${a.blockLen} 字符  Version=${a.version ?? '-'}  ${a.hasBak ? '有备份' : '无备份'}  ${a.isLocked ? '已锁定' : '未锁定'}`));
+      }
+    }
+    console.log('');
+    console.log(paint(C.bold, '  记忆总闸 (app-config.json)'));
+    if (!gates.exists) console.log(paint(C.yellow, '    文件不存在'));
+    else if (gates.error) console.log(paint(C.red, '    解析失败'));
+    else {
+      const g1 = gates.generateMemoryEnabled === true ? paint(C.green, 'true') : paint(C.yellow, String(gates.generateMemoryEnabled));
+      const g2 = gates.localMemoryEnabled === true ? paint(C.green, 'true') : paint(C.yellow, String(gates.localMemoryEnabled));
+      console.log(`    generateMemoryEnabled : ${g1}`);
+      console.log(`    localMemoryEnabled    : ${g2}`);
+      if (gates.generateMemoryEnabled !== true) {
+        console.log(paint(C.gray, '    → 总闸须为 true 否则整条链路 skip：workbb memory enable'));
+      }
+    }
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'apply') {
+    const dryRun = has('--dry-run');
+    const gates = enableMemoryGates();
+    console.log(paint(C.bold, '  记忆总闸'));
+    console.log(paint(C.green, `    ✓ generateMemoryEnabled = true`));
+    console.log(paint(C.gray, `      ${gates.path}`));
+    console.log('');
+
+    const inj = buildMemoryInject();
+    const r = injectAllArchives(inj, { dryRun });
+
+    console.log(paint(C.bold, `  云记忆注入（${inj.length} 字符）${dryRun ? paint(C.yellow, '  dry-run') : ''}`));
+    if (!r.archives.length) {
+      console.log(paint(C.yellow, '    未找到记忆档案，跳过'));
+      console.log(paint(C.gray, '    → 先启动 WorkBuddy 发一句话，再重跑'));
+    } else {
+      for (const x of r.results) {
+        if (x.error) { console.log(paint(C.red, `    ✗ ${x.uid}: ${x.error}`)); continue; }
+        console.log(`    ${paint(C.green, '✓')} ${x.uid}`);
+        console.log(paint(C.gray, `        block ${x.blockBefore} → ${x.blockAfter} 字符  Version ${x.versionBefore} → ${x.versionAfter}`));
+        if (x.appended) console.log(paint(C.gray, '        原记忆已完整保留（备份 .bak-inject）'));
+      }
+    }
+    console.log('');
+    console.log(paint(C.gray, '  改完必须完全退出 WorkBuddy（含托盘）再打开。'));
+    console.log(paint(C.gray, '  memoryBlock 每轮自动包成 <memory>…</memory> 注入系统提示词。'));
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'enable') {
+    const r = enableMemoryGates();
+    console.log(paint(C.green, `✓ generateMemoryEnabled = true`));
+    console.log(paint(C.gray, `  ${r.path}`));
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'restore') {
+    const r = restoreArchives();
+    if (!r.length) console.log(paint(C.yellow, '· 没有可还原的备份'));
+    else {
+      console.log(paint(C.green, `✓ 已从备份还原 ${r.length} 个档案`));
+      for (const x of r) console.log('    ' + x.uid);
+    }
+    console.log('');
+    return 0;
+  }
+
+  console.log('用法: workbb memory status|apply|enable|restore [--dry-run]');
+  return 1;
 }
 
 // ── canary（注入探针：验证模板是否真的进了 prompt）──────────
@@ -1289,6 +1382,7 @@ const table = {
   launcher: cmdLauncher,
   render: cmdRender,
   guard: cmdGuard,
+  memory: cmdMemory,
   canary: cmdCanary,
   layers: cmdLayers,
   which: cmdWhich,

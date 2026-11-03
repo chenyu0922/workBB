@@ -630,6 +630,59 @@ if ($personaName) {
 }
 
 # ════════════════════════════════════════════════════════
+#  6.95 ★★ L6 云记忆通道（每轮强制注入 system prompt 的位置）
+# ════════════════════════════════════════════════════════
+Step "6.95" "L6 云记忆通道（关键）"
+
+Info "这是每轮真正被注入 system prompt 的位置："
+Info "  <ConfigDir>\memory\<uid>_memory.md 里的 memoryBlock"
+Info "  由 user-memory-collector 每轮包成 <memory>…</memory> 注入（上限 10000 字符）"
+Info "  app-config.json 的 generateMemoryEnabled 必须为 true，否则整条链路 skip"
+Info ""
+
+$memProbeFile = Join-Path $env:TEMP ('workbb-mem-' + [guid]::NewGuid().ToString('N') + '.txt')
+
+Push-Location $WorkBB
+try {
+    & $nodeExe 'bin\workbb.js' 'memory' 'apply' 2>&1 | Out-File -FilePath $memProbeFile -Encoding UTF8
+} finally { Pop-Location }
+
+$mOut = ''
+if (Test-Path $memProbeFile) {
+    $mOut = Get-Content $memProbeFile -Raw -Encoding UTF8
+    Remove-Item $memProbeFile -Force -ErrorAction SilentlyContinue
+}
+Write-Host $mOut -ForegroundColor DarkGray
+
+if ($mOut -match 'generateMemoryEnabled = true') {
+    Ok "云记忆总闸已打开"
+} else {
+    Warn "总闸设置可能失败，见上方输出"
+}
+
+# 复检档案状态
+Push-Location $WorkBB
+try {
+    & $nodeExe 'bin\workbb.js' 'memory' 'status' 2>&1 | Out-File -FilePath $memProbeFile -Encoding UTF8
+} finally { Pop-Location }
+
+$stOut = ''
+if (Test-Path $memProbeFile) {
+    $stOut = Get-Content $memProbeFile -Raw -Encoding UTF8
+    Remove-Item $memProbeFile -Force -ErrorAction SilentlyContinue
+}
+
+if ($stOut -match 'block=(\d+) 字符  Version=999999') {
+    Ok "memoryBlock 已注入（$($Matches[1]) 字符，Version 999999）"
+    Info "Version 999999 用来触发 stale_version 守卫，挡住云端回写覆盖"
+} elseif ($stOut -match '未找到') {
+    Warn "未找到记忆档案 —— 请先在 WorkBuddy 里发一句话，再重跑安装"
+    Info "（档案由客户端登录后生成；没有档案时本层无法注入）"
+} else {
+    Warn "档案状态异常，见上方输出"
+}
+
+# ════════════════════════════════════════════════════════
 #  7. 最终状态
 # ════════════════════════════════════════════════════════
 Step 7 "最终状态"
