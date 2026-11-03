@@ -639,8 +639,14 @@ function cmdMemory() {
     console.log('    长度       : ' + audit.length + ' 字符');
     console.log('    敏感词命中 : ' + sPaint);
     console.log('    元语言命中 : ' + mPaint);
+    const cTxt = audit.creative.length ? audit.creative.join('、') : '0';
+    const cPaint = audit.creative.length ? paint(C.red, cTxt) : paint(C.green, cTxt);
+    console.log('    创作类词命中 : ' + cPaint);
     if (!audit.ok) {
       console.log(paint(C.yellow, '    [!] 有残留词 —— 整段可能被判定为注入而全面失效'));
+      if (audit.creative.length) {
+        console.log(paint(C.yellow, '    [!] 出现创作类词会让模型自定位为创作助手，连带工程请求被拒'));
+      }
     }
     console.log('');
     const r = injectAllArchives(inj, { dryRun });
