@@ -17,7 +17,7 @@ $out = New-Object System.Collections.Generic.List[string]
 function L([string]$s = "") { $out.Add($s); Write-Host $s }
 
 L "=========================================================="
-L "  workBB 诊断报告 v3"
+L "  workBB 诊断报告 v4"
 L "  时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 L "  主机: $env:COMPUTERNAME   用户: $env:USERNAME"
 L "=========================================================="
@@ -248,6 +248,51 @@ if ($wbbin2 -and $nodeExe -and $InstallRoot) {
             L "  L5 运行时缓存 $($cs.Count) 个 $(if ($cs.Count -eq 0) { '（已清空）' } else { '← 仍存在，会顶回改动' })"
         }
     }
+}
+
+# ── 5f. ★★ L6 云记忆通道（memoryBlock 每轮注入）────────────
+L ""
+L "[5f] L6 云记忆通道 ★ 每轮真正注入 system prompt 的位置"
+
+$memDir = Join-Path $cfg 'memory'
+$memSeen = $false
+if (Test-Path $memDir) {
+    $archFiles = @(Get-ChildItem $memDir -Filter '*_memory.md' -File -EA SilentlyContinue |
+        Where-Object { $_.Name -notlike '*.bak*' })
+    if ($archFiles.Count -gt 0) {
+        foreach ($af in $archFiles) {
+            $txt = Get-Content $af.FullName -Raw -Encoding UTF8
+            $mb = [regex]::Match($txt, '## Memory Block\r?\n\r?\n([\s\S]*?)\r?\n\r?\n---')
+            $block = if ($mb.Success) { $mb.Groups[1].Value.Trim() } else { '' }
+            $ver = [regex]::Match($txt, '^>\s*Version:\s*(\d+)', 'Multiline')
+            $injectN = ([regex]::Matches($block, '## 关于这台机器')).Count
+            $hasCreative = $block -match '创作线'
+            $hasAdult = $block -match '器官、动作、体液'
+            $locked = (Get-Item $af.FullName).IsReadOnly
+            L "  $($af.Name.Substring(0, [Math]::Min(12, $af.Name.Length)))..."
+            L "      block=$($block.Length) 字符  Version=$(if($ver.Success){$ver.Groups[1].Value}else{'-'})  注入段×$injectN  只读锁=$locked"
+            L "      创作线=$(if($hasCreative){'YES'}else{'NO'})  成人向约定=$(if($hasAdult){'YES'}else{'NO'})"
+            if ($injectN -gt 1) { L "      [!] 注入段重复 $injectN 份 —— 应重跑 workbb memory apply" }
+            $memSeen = $true
+        }
+    }
+}
+if (-not $memSeen) {
+    L "  未找到记忆档案 <ConfigDir>\\memory\\<uid>_memory.md"
+    L "  → 先在 WorkBuddy 里发一句话生成档案，再重跑安装"
+}
+
+$appCfg = Join-Path $cfg 'app\app-config.json'
+if (Test-Path $appCfg) {
+    try {
+        $ac = Get-Content $appCfg -Raw -Encoding UTF8 | ConvertFrom-Json
+        $g1 = if ($ac.generateMemoryEnabled -eq $true) { 'true' } else { "$($ac.generateMemoryEnabled) ← 不是 true，链路会 skip" }
+        $g2 = if ($ac.localMemoryEnabled -eq $true) { 'true' } else { "$($ac.localMemoryEnabled)" }
+        L "  记忆总闸 generateMemoryEnabled : $g1"
+        L "           localMemoryEnabled    : $g2"
+    } catch { L "  [!] app-config.json 解析失败" }
+} else {
+    L "  app-config.json 不存在"
 }
 
 # ── 6. settings.json ────────────────────────────────────
