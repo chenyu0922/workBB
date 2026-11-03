@@ -462,7 +462,11 @@ if (Test-Path $tplDirFinal) {
 # ════════════════════════════════════════════════════════
 Step "6.6" "结束正在运行的 WorkBuddy（关键）"
 
-$wbProcs = @(Get-Process WorkBuddy,workbuddy-api -ErrorAction SilentlyContinue)
+# 注意：只结束 WorkBuddy 本体。
+# workbuddy-api.exe（如 D:\99\workbuddy-api.exe）是第三方模型路由，不属于 WorkBuddy，
+# 不要动它 —— 杀掉会影响用户自己的路由服务。
+$wbProcs = @(Get-Process WorkBuddy -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and ($_.Path -like '*\WorkBuddy\*') })
 if ($wbProcs.Count -gt 0) {
     Warn "发现 $($wbProcs.Count) 个 WorkBuddy 进程还在运行"
     Info "它们是在装之前启动的，内存里没有新环境变量，会继续读原版模板。"
@@ -479,7 +483,8 @@ if ($wbProcs.Count -gt 0) {
         }
     }
     Start-Sleep -Milliseconds 1500
-    $left = @(Get-Process WorkBuddy,workbuddy-api -ErrorAction SilentlyContinue)
+    $left = @(Get-Process WorkBuddy -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and ($_.Path -like '*\WorkBuddy\*') })
     if ($left.Count -eq 0) {
         Ok "全部已结束"
         Info "WorkBuddy 已关闭，下次启动就会读到定制模板"
