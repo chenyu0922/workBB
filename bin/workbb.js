@@ -26,6 +26,7 @@ import { findProductJson, applyProductJson, revertProductJson, verifyProductJson
 import { findGateFiles, applyGates, revertGates, gateState } from '../lib/gate-js.js';
 import { findPluginTpls, patchPluginTpls, findRuntimeCaches, purgeRuntimeCaches } from '../lib/data-layers.js';
 import { applyCanaryToDir, hasCanary, extractCanary, deriveCanary } from '../lib/canary.js';
+import { applyPromptLayers, inspectPromptLayers } from '../lib/prompt-layers.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -705,6 +706,18 @@ function cmdLayers() {
     }
     console.log('');
 
+    // L2b
+    console.log(paint(C.bold, '  L2b product.json 提示词层'));
+    const insp = inspectPromptLayers({ installRoot });
+    if (!insp.length) console.log(paint(C.gray, '      未找到'));
+    for (const x of insp) {
+      const okAll = x.hasCanary && x.hasOverlay && x.refuse === 0;
+      const mark = okAll ? paint(C.green, '✓') : paint(C.yellow, '!');
+      console.log(`      ${mark} ${x.rel.replace(/resources\/app\.asar\.unpacked\//, '')}`);
+      console.log(paint(C.gray, `          len=${x.len}  cp=${x.cpLen}B  refuse=${x.refuse}  覆盖层=${x.hasOverlay}  探针=${x.canaryVal || '无'}`));
+    }
+    console.log('');
+
     // L3
     console.log(paint(C.bold, '  L3  命令闸门 JS'));
     const gates = findGateFiles(installRoot);
@@ -757,6 +770,19 @@ function cmdLayers() {
       if (!l2.files.length) console.log(paint(C.gray, '      无文件'));
       for (const f of l2.files) {
         console.log(`      ${f.changed ? paint(C.green, '✓') : paint(C.gray, '·')} ${f.rel.replace(/resources\/app\.asar\.unpacked\//, '')}  policy=${f.replacedPolicy || 0}  ${f.bytesBefore || '?'}→${f.bytesAfter || '?'}`);
+      }
+      console.log('');
+      // L2b：把条款层 + 覆盖层 + canary 也写进 product.json 的 cli-agent-prompt
+      // 实测发现：模型读的是 product.json 的 prompts[].template，
+      // 只替换 content_policy 不够，canary / 覆盖层也必须在这里。
+      const canaryVal = deriveCanary();
+      const pl = applyPromptLayers({ installRoot, canary: canaryVal, dryRun });
+      console.log(paint(C.bold, '  L2b product.json 提示词层（条款+覆盖+探针）'));
+      if (!pl.length) console.log(paint(C.gray, '      无文件'));
+      for (const f of pl) {
+        if (f.skipped) { console.log(paint(C.gray, `      · ${f.rel}  ${f.skipped}`)); continue; }
+        console.log(`      ${f.changed ? paint(C.green, '✓') : paint(C.gray, '· 已是')} ${f.rel.replace(/resources\/app\.asar\.unpacked\//, '')}`);
+        console.log(paint(C.gray, `          clause=${(f.clauseApplied || []).length}  overlay=${f.overlayAdded}  canary=${f.canaryAdded}  ${f.bytesBefore || 0}→${f.bytesAfter || 0}`));
       }
       console.log('');
 
