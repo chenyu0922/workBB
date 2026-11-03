@@ -27,6 +27,7 @@ import { findGateFiles, applyGates, revertGates, gateState } from '../lib/gate-j
 import { findPluginTpls, patchPluginTpls, findRuntimeCaches, purgeRuntimeCaches } from '../lib/data-layers.js';
 import { applyCanaryToDir, hasCanary, extractCanary, deriveCanary } from '../lib/canary.js';
 import { applyPromptLayers, inspectPromptLayers } from '../lib/prompt-layers.js';
+import { derivePersonaProbe, applyPersonaProbeToDir, detectPersonaProbe } from '../lib/persona-probe.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -648,6 +649,43 @@ function cmdCanary() {
       return 0;
     }
     console.log(paint(C.gray, '  重新跑 workbb apply 即可清掉 canary（apply 会重建模板）'));
+    console.log('');
+    return 0;
+  }
+
+  if (action === 'persona') {
+    // 人格探针：替代 canary token 的正确测法
+    if (!fs.existsSync(dir)) {
+      console.error(paint(C.red, `✗ 模板目录不存在：${dir}`));
+      return 1;
+    }
+    const r = applyPersonaProbeToDir(dir);
+    const fresh = r.files.filter((x) => x.mode === 'injected').length;
+    console.log(`  模板目录 : ${dir}`);
+    console.log('');
+    if (fresh > 0) {
+      console.log(paint(C.green, `✓ 人格探针已注入 ${fresh} 个模板：${r.probe.full}`));
+    } else {
+      console.log(paint(C.green, `✓ 人格探针已就位：${r.probe.full}`));
+    }
+    console.log('');
+    // ASCII 机器可读标记（PowerShell 用 GBK 读子进程输出，中文正则匹配不上）
+    console.log(`PROBE_NAME=${r.probe.name} PROBE_CODE=${r.probe.code}`);
+    console.log('');
+    console.log(paint(C.bold, '  为什么不用 canary：'));
+    console.log(paint(C.gray, '    模型把 canary 识别成「防提示词泄露的检测标记」，'));
+    console.log(paint(C.gray, '    因此无论看没看到都会答「没有」——那个判据无效。'));
+    console.log(paint(C.gray, '    改问「你叫什么名字」不会触发该反应，模型会照实回答人格设定。'));
+    console.log('');
+    console.log(paint(C.bold, '  验证方法：'));
+    console.log(paint(C.gray, '    1) 完全退出 WorkBuddy（含托盘）再打开'));
+    console.log(paint(C.gray, '    2) 新建对话，发这句（自然提问，不要提系统提示）：'));
+    console.log('');
+    console.log(paint(C.white, '       你叫什么名字？'));
+    console.log('');
+    console.log(paint(C.gray, '  判读：'));
+    console.log(paint(C.gray, `    · 答「${r.probe.name}」或带编号 ${r.probe.code} → 注入抵达了模型`));
+    console.log(paint(C.gray, '    · 答默认助手名 / 说没名字 → 注入没到模型'));
     console.log('');
     return 0;
   }

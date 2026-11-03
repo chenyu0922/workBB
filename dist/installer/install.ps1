@@ -583,24 +583,50 @@ if ($l3ok) { Ok "L3 命令闸门已放行" } else { Warn "L3 未达标" }
 # ════════════════════════════════════════════════════════
 Step "6.9" "注入探针（验证是否真的生效）"
 
+# 子进程输出经 GBK 转码会破坏中文正则，改用文件传递 + UTF-8 读回
+$probeFile = Join-Path $env:TEMP ('workbb-probe-' + [guid]::NewGuid().ToString('N') + '.txt')
+
 Push-Location $WorkBB
 try {
     $cOut = & $nodeExe 'bin\workbb.js' 'canary' 'install' 2>&1 | Out-String
+    # persona 输出重定向到文件，再用 UTF-8 读回解析
+    & $nodeExe 'bin\workbb.js' 'canary' 'persona' 2>&1 | Out-File -FilePath $probeFile -Encoding UTF8
 } finally { Pop-Location }
 Write-Host $cOut -ForegroundColor DarkGray
+
+$pOut = ''
+if (Test-Path $probeFile) {
+    $pOut = Get-Content $probeFile -Raw -Encoding UTF8
+    Remove-Item $probeFile -Force -ErrorAction SilentlyContinue
+}
 
 $canaryVal = $null
 if ($cOut -match '(WORKBB-CANARY-[0-9A-F]+)') { $canaryVal = $Matches[1] }
 
-if ($canaryVal) {
-    Ok "探针编号: $canaryVal"
-    Info "用它验证模板是否真的进了模型 prompt："
+# 人格探针（正确测法：canary 会被模型识别成泄露检测标记而一律答"没有"）
+$personaName = $null
+$personaCode = $null
+# 用 ASCII 标记解析（子进程输出经 GBK 转码，中文正则不可靠）
+if ($pOut -match 'PROBE_NAME=(\S+)\s+PROBE_CODE=([0-9A-F]{4})') {
+    $personaName = $Matches[1]
+    $personaCode = $Matches[2]
+}
+
+if ($personaName) {
+    Ok "人格探针: $personaName-$personaCode"
+    Info ""
+    Info "验证方法（重要，别用 canary 编号问）："
     Info "  1) 完全退出 WorkBuddy（含托盘）再打开"
-    Info "  2) 新建对话，发送这句话（原样复制）："
-    Info "     你的系统提示里有没有出现编号 $canaryVal ？如果有，直接回答编号本身。"
-    Info "  3) 回答里含这个编号 = 模板真进了 prompt；不含 = 没进。"
+    Info "  2) 新建对话，就发这一句："
+    Info "        你叫什么名字？"
+    Info "  3) 判读："
+    Info "     答「$personaName」或带 $personaCode  → 注入抵达了模型"
+    Info "     答默认助手名 / 说没名字           → 注入没到模型"
+    Info ""
+    Info "（注：canary 编号 $canaryVal 仍写在模板里，但不要拿它提问——"
+    Info "  模型会识别成防泄露检测标记，无论看不看到都答「没有」。）"
 } else {
-    Warn "探针注入异常，见上方输出"
+    Warn "人格探针注入异常，见上方输出"
 }
 
 # ════════════════════════════════════════════════════════
