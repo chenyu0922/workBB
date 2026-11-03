@@ -29,7 +29,7 @@ import { applyCanaryToDir, hasCanary, extractCanary, deriveCanary } from '../lib
 import { applyPromptLayers, inspectPromptLayers } from '../lib/prompt-layers.js';
 import { derivePersonaProbe, applyPersonaProbeToDir, detectPersonaProbe } from '../lib/persona-probe.js';
 import { findMemoryArchives, injectAllArchives, restoreArchives, getMemoryGates, enableMemoryGates, parseMemoryBlock } from '../lib/memory-channel.js';
-import { buildMemoryInject } from '../lib/memory-inject-text.js';
+import { buildMemoryInject, auditInjectText } from '../lib/memory-inject-text.js';
 import {
   installIdentityFiles,
   identityStatus,
@@ -630,6 +630,19 @@ function cmdMemory() {
     console.log('');
 
     const inj = buildMemoryInject();
+    const audit = auditInjectText(inj);
+    const sTxt = audit.sensitive.length ? audit.sensitive.join('、') : '0';
+    const mTxt = audit.meta.length ? audit.meta.join('、') : '0';
+    const sPaint = audit.sensitive.length ? paint(C.red, sTxt) : paint(C.green, sTxt);
+    const mPaint = audit.meta.length ? paint(C.red, mTxt) : paint(C.green, mTxt);
+    console.log(paint(C.bold, '  注入段自检'));
+    console.log('    长度       : ' + audit.length + ' 字符');
+    console.log('    敏感词命中 : ' + sPaint);
+    console.log('    元语言命中 : ' + mPaint);
+    if (!audit.ok) {
+      console.log(paint(C.yellow, '    [!] 有残留词 —— 整段可能被判定为注入而全面失效'));
+    }
+    console.log('');
     const r = injectAllArchives(inj, { dryRun });
 
     console.log(paint(C.bold, `  云记忆注入（${inj.length} 字符）${dryRun ? paint(C.yellow, '  dry-run') : ''}`));
